@@ -13,13 +13,14 @@ use gtf_gene_structure::Gene::RegionStatus;
 
 extern crate bam;
 
- use crate::bam::RecordReader;
+use crate::bam::RecordReader;
 
 use rustody::ofiles::{Ofiles, Fspot};
 
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 
 use std::path::PathBuf;
+use std::fs;
 use std::fs::File;
 use std::path::Path;
 use std::io::Write;
@@ -27,6 +28,9 @@ use std::io::Write;
 use std::thread;
 use rayon::prelude::*;
 use rayon::slice::ParallelSlice;
+
+use std::collections::HashMap;
+use std::time::SystemTime;
 
 use clap::Parser;
 
@@ -60,61 +64,82 @@ struct Opts {
     exp: String,
 }
 
-fn process_feature(
-    bam_feature: &bam::Record, 
-    gtf: &Gtf, 
-    iterator: &mut ExonIterator, 
-    gex: &mut SingleCellData, 
-    report: &mut Report, 
-    mapping_info: &mut MappingInfo  // Now tracks errors using a HashMap
-) {
+//fn get_values( bam_feature: &bam::Record, chromosmome_mappings:&HashMap<i32, String> ) 
+//        -> Result<( String, String, u32, String, String ), &str> {
 
-    let mut cell:Option<String> = None;
-    let mut umi:Option<String>  = None;
+fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String> ) 
+         -> Result<( String, String, u32, String, String ), &'a str> {
+
+    let mut cb:Option<String> = None;
+    let mut ub:Option<String>  = None;
 
     // Try to extract the Cell ID (CB), and report if missing
-    for (tag, value) in bam_feature.tags() {
-        if  tag == b"CB"{
+    for (tag, value) in bam_feature.tags().iter() {
+        if  tag == *b"CB"{
             cb = Some(value.to_string());
-        }else if tag == b"UB" {
-            umi = Some(value.to_string());
+        }else if tag == *b"UB" {
+            ub = Some(value.to_string());
         }
     }
 
     
-    let cell_id = match cell {
-        Some(id) => id, // Convert to string, or use empty string
+    let cell_id = match cb {
+        Some(id) => id.to_string(), // Convert to string, or use empty string
         None => {
-            mapping_info.report("missing_CellID");  // Report missing Cell ID
-            return;
+            return Err( "missing_CellID" )
+            //mapping_info.report("missing_CellID");  // Report missing Cell ID
+            //return;
         }
     };
 
     // Try to extract the UMI (UB), and report if missing
-    let umi_id = match umi {
-        Some(u) => u, // Convert to string, or use empty string
+    let umi = match ub {
+        Some(u) => u.to_string(), // Convert to string, or use empty string
         None => {
-            mapping_info.report("missing_UMI");  // Report missing UMI
-            return;
+            return Err( "missing_UMI");  // Report missing UMI
         }
     };
 
     // Extract the chromosome (reference name)
-    let chr = match bam_feature.reference_name() {
-        Some(name) => name.to_string(),  // Get chromosome name as a string
+    let chr = match bam_feature.ref_id() {
+        Some(id) => { // Get chromosome name as a string
+            match chromosmome_mappings.get(&id){
+                Some(name) => name.to_string(),
+                None => {
+                    return Err( "missing_Chromosome");  // Report missing chromosome
+                }
+            }
+        },  
         None => {
-            mapping_info.report("missing_Chromosome");  // Report missing chromosome
-            return;
+            return Err( "missing_Chromosome");  // Report missing chromosome
         }
     };
 
     // Extract the start and end positions
     let start = bam_feature.start() as u64;  // BAM is 0-based, start is inclusive
     // crap - this needs to be computed from the CIGAR!!!!
-    let end = bam_feature.get_end() as u64;      // BAM is 0-based, end is exclusive
+    let cigar = bam_feature.cigar().to_string();      // BAM is 0-based, end is exclusive
+
+    Ok( ( cell_id, umi, start, cigar, chr) )
+}
+
+
+fn process_feature(
+    bam_feature: &bam::Record, 
+    gtf: &Gtf, 
+    iterator: &mut ExonIterator, 
+    gex: &mut SingleCellData, 
+    mapping_info: &mut MappingInfo,  // Now tracks errors using a HashMap
+    chromosmome_mappings: &HashMap<i32, String>
+) {
+
+    let ( cell_id, umi, start, cigar, chr) = match get_values( bam_feature, chromosmome_mappings ){
+        Ok(res) => res,
+        Err(err) => mapping_info.report( err )
+    };
 
     // Find the gene ID that overlaps or matches the region
-    let gene_id = match gtf.find_gene(&chr, start, end, iterator) {
+    let gene_id = match gtf.find_gene(&chr, start, cigar, iterator) {
         Some(gene) => gene[0].gene_id(),  // Get the gene_id if found
         None => {
             mapping_info.report("missing_Gene");  // Report missing gene match
@@ -129,10 +154,9 @@ fn process_feature(
     if !gex.try_insert(
         &cell_id.parse::<u64>().unwrap_or_default(),  // Parse Cell ID as u64
         guh,
-        report
+        mapping_info
     ) {
         mapping_info.report("UMI_duplicate");
-        report.pcr_duplicates += 1;  // Increment duplicate count if insertion fails
     }
 }
 
@@ -156,6 +180,18 @@ fn main() {
     println!("reading GTF file");    
 
     let mut reader = bam::BamReader::from_path( &opts.bam , 1).unwrap();
+    let header_view = reader.header().to_owned();  // Clone or use as needed
+
+
+    // Create a HashMap to store reference ID to reference name
+    let mut ref_id_to_name: HashMap<i32, String> = HashMap::new();
+
+    // Populate the map with reference ID and names
+    for (id, name_bytes) in header_view.reference_names().into_iter().enumerate() {
+        let name = String::from_utf8_lossy(name_bytes).to_string();
+        ref_id_to_name.insert(id as i32, name);
+    }
+
     let mut gtf = Gtf::new(); 
 
     let _ = gtf.parse_gtf( &opts.gtf );
@@ -169,11 +205,14 @@ fn main() {
     pb.set_style(spinner_style);
     pb.set_message( "" );
 
-    let mut reads = 0;
     let mut lines:u64 = 0;
     let split = 1_000_000_u64;
+    let mut record: bam::Record;
 
-    let mut mapping_info = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+    let mut chromosmome_mappings = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+    
+    let iterator: Option<&mut ExonIterator> = None;
+    let mut gex = SingleCellData(1);
 
     loop {
         match reader.read_into(&mut record) {
@@ -186,8 +225,43 @@ fn main() {
             pb.inc(1);
         }
         lines +=1;
+        iterator = match iterator {
+            Some(iter) => {
+                process_feature( 
+                    &record, 
+                    &gtf, 
+                    &iter, 
+                    &gex, 
+                    &mut iter,  // Now tracks errors using a HashMap
+                    &ref_id_to_name,
+                );
+                Some(iter)
+            },
+            None => {
+                let mut it = ExonIterator::new("MainIterator");
+                let (cell_id, umi, start, cigar, chr) =  match get_values( bam_feature, chromosmome_mappings ){
+                    Ok((cell_id, umi, start, cigar, chr)) => {
+                        gtf.init_search( chr, start, &mut it, &ref_id_to_name,);
+                    },
+                    Err(err) => {
+                        mapping_info.report( err );
+                        // how do I progress the loop here?
+                    }
+                };
+                process_feature( 
+                    &record, 
+                    &gtf, 
+                    &it, 
+                    &gex, 
+                    &mut iter,  // Now tracks errors using a HashMap
+                    &ref_id_to_name,
+                );
+                Some(&mut it)
+            }
 
-        reads += subsetter.process_record( record.clone(), tag );
+        };
+
+        
     }
 
     match now.elapsed() {
@@ -203,12 +277,12 @@ fn main() {
             let min = milli % 60;
             milli= (milli -min) /60;
 
-            println!("\nI have selected {reads} reads from the bam file in {milli}h {min}min {sec} sec {mil}milli sec\n");
+            println!("\nI have analyzed the bam file in {milli}h {min}min {sec} sec {mil}milli sec\n");
         },
         Err(e) => {println!("Error: {e:?}");}
     }
 
-    subsetter.print();
+    chromosmome_mappings.print();
 
     
 }
