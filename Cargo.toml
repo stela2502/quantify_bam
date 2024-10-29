@@ -11,5 +11,4 @@ indicatif = {version = "*", features = ["rayon"]}
 rayon = "1.5"
 num_cpus = "1.13"  # Or the latest version
 bam = "*"
-gtf_gene_structure = { git = "https://github.com/stela2502/gtf_gene_structure" }
 rustody = { git = "https://github.com/stela2502/Rustody", branch ="main2" }
