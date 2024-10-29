@@ -9,8 +9,9 @@ use std::io::BufRead;
 
 use std::fmt;
 
-use crate::gtf::{gene::Gene, RegionStatus,ExonIterator};
+use crate::gtf::{gene::Gene, RegionStatus,ExonIterator,SplicedRead};
 
+use crate::gtf::exon_iterator::ReadResult;
 
 #[derive(Debug, PartialEq)]
 pub enum QueryErrors {
@@ -18,7 +19,6 @@ pub enum QueryErrors {
     ChrNotFound,
     NoMatch,
 }
-
 
 #[derive(Debug)]
 pub struct GTF {
@@ -95,36 +95,57 @@ impl GTF {
         }
     }
 
-    // the main query functionality
-    pub fn query(&self, chr:&str, start:usize, end:usize, 
-            iterator: &mut ExonIterator ) -> Result<( ( String, String ) , RegionStatus ), QueryErrors > {
-        match self.chromosomes.get(chr) {
-            Some(genes) => {
-                // we had the chromosome - assuming the ExonIterator is set - let's check that
-                match genes.get(iterator.gene_id()){
-                    Some(gene) => {
-                        match gene.check_region( start, end, &mut iterator.exon_id() ){
-                            RegionStatus::AfterGene => {
-                                // that needs to be run again...
-                                iterator.set_exon_id(0);
-                                iterator.set_gene_id( iterator.gene_id() +1 );
-                                return self.query( chr, start, end, iterator )
-                            },
-                            other => {
-                                let this_gene = &genes[iterator.gene_id()];
-                                Ok( ( ( this_gene.gene_id.to_string(), this_gene.gene_name.to_string() ), other ) )
-                            }
-                        }
-                    },
-                    None => {
-                        Err( QueryErrors::OutOfGenes )
-                    }
-                } 
-            },
-            None => {
-                Err( QueryErrors::ChrNotFound )
+    fn genes_overlapping(&self, chr:&str, initial_position:usize, final_position:usize, iterator: ExonIterator  )-> Vec<Gene> {
+        let mut res: Vec<Gene> = Vec::new();
+        
+        if let Some(genes) = self.chromosomes.get( chr ) {
+            let mut start_id = iterator.gene_id();
+            while genes[start_id].start < final_position && genes[start_id].end >= initial_position {
+                res.push( genes[start_id].clone() );
+                start_id +=1;
             }
-        } 
+        }
+        res
+    }   
+
+    /// the main query functionality
+    pub fn match_cigar_to_gene(&self, chr:&str, cigar: &str, initial_position: usize, 
+        iterator: &mut ExonIterator ) -> Option<ReadResult> {
+
+        match iterator.last_result_matches( cigar, initial_position ){
+            Some(result) => return Some(result),
+            None =>  {},
+        }
+
+        let (spliced_read, _final_position) = SplicedRead::new(cigar, initial_position);
+
+        let mut results = Vec::<ReadResult>::new();
+        let mut best_result_id = 0;
+        let mut best_result = RegionStatus::BeforeGene; // worst
+
+        if let Some(genes) = self.chromosomes.get( chr ) {
+
+            for (index, gene) in genes.iter().enumerate().skip( iterator.gene_id() ) {
+                let result = gene.match_to( &spliced_read );
+                if result.match_type == RegionStatus::AfterGene && results.len() == 0 {
+                    iterator.set_gene_id( index+1);
+                }else {
+                    if result.match_type.is_better( &best_result ) {
+                        best_result_id = results.len();
+                        best_result = result.match_type.clone();
+                        results.push( result );
+                    }              
+                }
+            }
+
+        };
+        // now we have a best matching gene as 
+        if ! results.is_empty() {
+            Some(results[best_result_id].clone())
+        }else {
+            None
+        }
+
     }
 
     fn find_search_position(&self, genes: &Vec<Gene>, pos: usize) -> Option<usize> {

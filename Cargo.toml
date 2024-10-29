@@ -12,3 +12,4 @@ rayon = "1.5"
 num_cpus = "1.13"  # Or the latest version
 bam = "*"
 rustody = { git = "https://github.com/stela2502/Rustody", branch ="main2" }
+regex = "1"

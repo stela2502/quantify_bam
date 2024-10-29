@@ -6,8 +6,8 @@ use rustody::cellids10x::CellIds10x;
 use rustody::traits::CellIndex;
 use rustody::mapping_info::MappingInfo;
 
-use quantify_bam::gtf::GTF;
-use quantify_bam::gtf::ExonIterator;
+use quantify_bam::gtf::{GTF, SplicedRead, ExonIterator};
+
 use bam::record::tags::StringType;
 
 extern crate bam;
@@ -35,6 +35,9 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use clap::Parser;
+
+
+
 
 
 #[derive(Parser)]
@@ -93,7 +96,10 @@ fn get_tag(bam_feature: &Record, tag: &[u8;2]) -> Option<String> {
 
 //fn get_values( bam_feature: &bam::Record, chromosmome_mappings:&HashMap<i32, String> ) 
 //        -> Result<( String, String, u32, String, String ), &str> {
-
+/// get_values is very specififc for this usage here - read bam reads and compare them to a gtf file
+/// Bam is 0-based start position and end exclusive whereas gtf is 1-based and end inclusive.
+/// This means that the end is actually the same value - just the start for GTF needs to be bam start +1
+/// That is what this function returns for a start!
 fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String> ) 
          -> Result<( String, String, i32, String, String ), &'a str> {
     
@@ -125,9 +131,8 @@ fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMa
     // Extract the start and end positions
     let start = bam_feature.start();  // BAM is 0-based, start is inclusive
     // crap - this needs to be computed from the CIGAR!!!!
-    let cigar = bam_feature.cigar().to_string();      // BAM is 0-based, end is exclusive
 
-    Ok( ( cell_id, umi, start, cigar, chr) )
+    Ok( ( cell_id, umi, start+1, bam_feature.cigar().to_string(), chr) ) // convert bam to gtf notation
 }
 
 
@@ -149,18 +154,41 @@ fn process_feature(
     };
 
     // Find the gene ID that overlaps or matches the region
-    /* This need to be fixed - but it is a lot of work!
-    let gene_id = match gtf.query(&chr, start, cigar, iterator) {
-        Some(gene) => gene[0].gene_id(),  // Get the gene_id if found
+    /*
+    pub enum RegionStatus {
+    InsideExon,
+    SpanningBoundary,
+    InsideIntron,
+    AfterGene,
+    BeforeGene,
+    }
+    */
+    let gene_id = match gtf.match_cigar_to_gene(&chr, &cigar, start.try_into().unwrap() , iterator) {
+        Some(read_result) => {
+            match read_result.match_type{
+                RegionStatus::InsideExon => {
+                    read_result.gene.to_string()
+                },
+                RegionStatus::SpanningBoundary => {
+                    read_result.gene.to_string() + "_unspliced"
+                },
+                RegionStatus::InsideIntron => {
+                    read_result.gene.to_string() + "_unspliced"
+                }
+                _ => {
+                    mapping_info.report("missing_Gene");
+                    return;
+                }
+            }
+        },  // Get the gene_id if found
         None => {
             mapping_info.report("missing_Gene");  // Report missing gene match
             return;
         }
     };
-    */
-    let gene_id = 1;
-
+    
     // Generate a GeneUmiHash
+    // This needs to be fixed - how do I use the genes here?! I totally forgot - but it should be rather straight forward!
     let guh = GeneUmiHash(gene_id, umi.parse::<u64>().unwrap_or_default()); // Hash UMI as u64
 
     // Try to insert into SingleCellData (gex)

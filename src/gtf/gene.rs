@@ -1,10 +1,12 @@
 use crate::gtf::ExonIterator;
-
+use crate::gtf::SplicedRead;
+use crate::gtf::exon_iterator::ReadResult;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Exon {
-    start: usize,
-    end: usize,
+    pub start: usize,
+    pub end: usize,
+    pub mutations: usize,
 }
 
 
@@ -20,17 +22,22 @@ pub struct Gene {
 }
 
 
-
-#[derive(Debug, PartialEq)]
+/// the order of these is from best to worst outcome
+#[derive(Debug, PartialEq, Clone, PartialOrd)]
 pub enum RegionStatus {
     InsideExon,
-    InsideIntron,
     SpanningBoundary,
-    BeforeGene,
+    InsideIntron,
     AfterGene,
+    BeforeGene,
 }
 
-
+impl RegionStatus {
+    // Method to check if `self` is 'better' than `other` based on the enum ordering
+    pub fn is_better(&self, other: &Self) -> bool {
+        self < other
+    }
+}
 
 impl Gene {
     // Constructor for Gene
@@ -86,7 +93,8 @@ impl Gene {
 
     // Method to add an exon to the gene
     pub fn add_exon(&mut self, start: usize, end: usize) {
-        let exon = Exon { start, end };
+        let mutations = 0;
+        let exon = Exon { start, end, mutations };
         self.exons.push(exon); // Add the exon to the gene's exon list
 
         // Optionally, update the gene's start and end to reflect the new exon
@@ -98,51 +106,46 @@ impl Gene {
         }
     }
 
-    pub fn check_region(&self, region_start: usize, region_end: usize, exon_id: &mut usize) -> RegionStatus {
-        // Check if the region is completely before the gene
-        if region_end < self.start {
-            return RegionStatus::BeforeGene;
-        }
-        // Check if the region is completely after the gene
-        if region_start > self.end {
-            return RegionStatus::AfterGene;
-        }
+    /*
+    InsideExon,
+    SpanningBoundary,
+    InsideIntron,
+    AfterGene,
+    BeforeGene,*/
 
-        // Check if exon_id is valid and if it points to a relevant exon
-        if *exon_id < self.exons.len() && self.exons[*exon_id].end > region_start {
-            // Iterate over exons starting from the current exon_id
-            for i in *exon_id..self.exons.len() {
-                // Check if the current exon overlaps with the region
-                if self.exons[i].end > region_start {
-                    *exon_id = i; // Update the exon_id to the current index
-                    break; // Stop searching once we find a relevant exon
+    pub fn match_to(&self, spliced_read: &SplicedRead) -> ReadResult {
+        let mut has_partial_match = false;
+        let mut fully_matched_exons = 0;
+        let mut exon_matched = false;
+
+        for read_exon in &spliced_read.exons {
+
+            for gene_exon in &self.exons {
+                if read_exon.start >= gene_exon.start && read_exon.end <= gene_exon.end {
+                    // Full alignment of read exon within gene exon
+                    fully_matched_exons += 1;
+                    exon_matched = true;
+                } else if read_exon.start < gene_exon.end && read_exon.end > gene_exon.start {
+                    // Partial overlap with gene exon
+                    has_partial_match = true;
+                    exon_matched = true;
                 }
             }
         }
 
-        // Safety check: ensure that *exon_id is still within bounds
-        if *exon_id >= self.exons.len() {
-            return RegionStatus::AfterGene; // No relevant exons found
-        }
+        // Determine match type based on alignment results
+        let match_type = if exon_matched && has_partial_match {
+            RegionStatus::SpanningBoundary
+        } else if exon_matched {
+            RegionStatus::InsideExon
+        }else if spliced_read.start >= self.start && spliced_read.end <= self.end {
+            RegionStatus::InsideIntron // this should stop the tests
+        } else if spliced_read.start > self.end {
+            RegionStatus::AfterGene // this should remove the gene from the list of optional genes
+        } else {
+            RegionStatus::BeforeGene
+        };
 
-        // Check if the region is entirely within an exon
-        if region_start >= self.exons[*exon_id].start && region_end <= self.exons[*exon_id].end {
-            return RegionStatus::InsideExon;
-        }
-
-        // Check if the region is entirely outside the exons (indicates it might be in an intron)
-        if (region_start < self.exons[*exon_id].start && region_end < self.exons[*exon_id].start) ||
-           (region_start > self.exons[*exon_id].end && region_end > self.exons[*exon_id].end) {
-            return RegionStatus::InsideIntron;
-        }
-
-        // Check if the region spans the exon-intron boundary
-        if (region_start < self.exons[*exon_id].start && region_end > self.exons[*exon_id].start) ||
-           (region_start < self.exons[*exon_id].end && region_end > self.exons[*exon_id].end) {
-            return RegionStatus::SpanningBoundary;
-        }
-
-        // If none of the above conditions matched, something went wrong.
-        unreachable!("The read is neither before, after, or in the gene - that is impossible!");
+        ReadResult { gene: self.gene_id.to_string(), match_type }
     }
 }

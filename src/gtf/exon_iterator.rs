@@ -3,10 +3,29 @@ use core::fmt;
 
 use std::time::{SystemTime};
 
-use crate::gtf::{GTF, QueryErrors};
+use crate::gtf::{GTF, QueryErrors, RegionStatus};
+
+use std::collections::{VecDeque};
+use std::hash::{Hash, Hasher};
+
+// Define a struct to represent the hashable index
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ReadIndex {
+    start: usize,
+    cigar: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadResult {
+    pub gene: String,
+    pub match_type: RegionStatus
+}
+
 
 #[derive(Debug)]
 pub struct ExonIterator {
+    results: VecDeque<(ReadIndex, ReadResult)>, // Store results in a VecDeque
+    max_size: usize,
     gene_id: usize,
     exon_id: usize,
     start: SystemTime,
@@ -33,11 +52,43 @@ impl ExonIterator {
     // Constructor to create a new ExonIterator with std 0,0 as the ids
     pub fn new( name:&str ) -> Self {
         ExonIterator {
+            results: VecDeque::with_capacity(5),
+            max_size: 5,
             gene_id: 0,
             exon_id: 0,
             start: SystemTime::now(),
             name: name.to_string(),
+
         }
+    }
+
+    pub fn last_result_matches( &mut self, cigar: &str, start_position: usize ) -> Option<ReadResult> {
+
+        let read_index = ReadIndex {
+            start: start_position,
+            cigar: cigar.to_string(),
+        };
+        // Check if we have already processed this read by inspecting the VecDeque
+        for (index, result) in &self.results {
+            if *index == read_index {
+                // Return the previously computed result
+                return Some( result.clone() ); // Access ReadResult
+            }
+        }
+        return None
+    }
+
+    pub fn add_last_match (&mut self, cigar: &str, start_position: usize, result: &ReadResult ) {
+        // Check if we need to remove the oldest entry to maintain the max size
+        let read_index = ReadIndex {
+            start: start_position,
+            cigar: cigar.to_string(),
+        };
+        if self.results.len() >= self.max_size {
+            self.results.pop_front(); // Remove the oldest entry
+        }
+        // Insert the new result into the VecDeque
+        self.results.push_back((read_index.clone(), result.clone()));
     }
 
     pub fn since_start(&self ) -> (u128, u128, u128, u128){
