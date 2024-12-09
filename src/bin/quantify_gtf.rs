@@ -274,7 +274,7 @@ fn main() {
     
     let mut iterator = ExonIterator::new("main");
     let mut gex = SingleCellData::new(1);
-    let mut last_chr = "".to_string();
+    let mut last_chr = "unset".to_string();
 
     let mut genes = IndexedGenes::empty( Some(0) );
 
@@ -305,6 +305,7 @@ fn main() {
         };
 
         if last_chr != chr {
+            println!("Init chr!");
             let _ = gtf.init_search( &chr, start.try_into().unwrap(), &mut iterator );
         }
         last_chr = chr.to_string();

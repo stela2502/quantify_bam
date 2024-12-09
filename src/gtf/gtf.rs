@@ -113,34 +113,50 @@ impl GTF {
         iterator: &mut ExonIterator ) -> Option<ReadResult> {
 
         match iterator.last_result_matches( cigar, initial_position ){
-            Some(result) => return Some(result),
+            Some(result) => {
+                //println!("resused old one");
+                return Some(result)
+            },
             None =>  {},
         }
 
-        let (spliced_read, _final_position) = SplicedRead::new(cigar, initial_position);
+        let (spliced_read, final_position) = SplicedRead::new(cigar, initial_position);
 
         let mut results = Vec::<ReadResult>::new();
         let mut best_result_id = 0;
-        let mut best_result = RegionStatus::BeforeGene; // worst
+        let mut best_result = RegionStatus::AfterGene; // worst
 
         if let Some(genes) = self.chromosomes.get( chr ) {
-
+            //println!("Skipping {:?} entries", iterator.gene_id() );
             for (index, gene) in genes.iter().enumerate().skip( iterator.gene_id() ) {
+                if gene.start > final_position {
+                    //println!("The next gene's start position is after my end position - no match?");
+                    break
+                }
+                if gene.end < initial_position{
+                    //println!("this gene here end before the match!");
+                    iterator.set_gene_id( index + 1);
+                    continue;
+                }
                 let result = gene.match_to( &spliced_read );
-                if result.match_type == RegionStatus::AfterGene && results.len() == 0 {
-                    iterator.set_gene_id( index+1);
-                }else {
+                if result.match_type.is_better( &RegionStatus::AfterGene ) {
+                    //println!("Result status is no more BeforeGene: {:?} - skipping {} gene info", result.match_type, index );
                     if result.match_type.is_better( &best_result ) {
                         best_result_id = results.len();
                         best_result = result.match_type.clone();
-                        results.push( result );
-                    }              
+                        results.push( result.clone() );
+                        //println!("{}: found a new best result: id {best_result_id}, value {best_result:?}", iterator.gene_id());
+                    }
+                    if result.match_type  == RegionStatus::AfterGene {
+                        break;
+                    }
                 }
             }
-
+            //panic!("One is enough here!");
         };
         // now we have a best matching gene as 
         if ! results.is_empty() {
+            //println!("We found a match!");
             Some(results[best_result_id].clone())
         }else {
             None
@@ -152,7 +168,7 @@ impl GTF {
         let mut low = 0;
         let mut high = genes.len();
         
-        if genes[0].start < pos {
+        if genes[0].start > pos {
             return Some(0)
         }
         if genes[genes.len()-1].end < pos {
@@ -163,16 +179,19 @@ impl GTF {
             let mid = (low + high) / 2;
             
             if genes[mid].start > pos {
+                //println!("Right half");
                 high = mid; // Narrow down to the left half
             } else {
+                //println!("Left half");
                 low = mid + 1; // Narrow down to the right half
             }
         }
 
         // At this point, `low` is the first index where the gene's start is >= pos or closest after `pos`
-        if low > 0 && genes[low - 1].end >= pos {
-            // If the gene just before the found position overlaps with pos, return it
-            return Some(low - 1);
+        if low > 0{
+            if genes[low - 1].end >= pos ||  genes[low].start > pos{
+                return Some(low - 1);
+            }
         }
 
         // Otherwise, check the gene at the found index (which should be the first gene starting after pos)
@@ -180,6 +199,7 @@ impl GTF {
             return Some(low) ;
         }
 
+        // panic!("I have not found a valid gene for pos {pos}! low {} -1 end {}  low end {}", low, genes[low.saturating_sub( 1 )].end, genes[low].end  );
         // If no valid gene is found, return None
         None
     }
@@ -191,10 +211,12 @@ impl GTF {
                 match self.find_search_position(genes, start){
                     Some( gene_id ) => {
                         if let Some(exon_id) = genes[gene_id].find_search_position( start ){
+                            //println!("Init set the gene_id to {gene_id} and exon_id to {exon_id}");
                             iterator.set_gene_id( gene_id );
                             iterator.set_exon_id( exon_id );
                             Ok(())
                         }else {
+                            //println!("I have not found a search position!?");
                             iterator.set_gene_id( gene_id-1 );
                             iterator.set_exon_id( 0 );
                             Ok(())
@@ -256,8 +278,17 @@ impl GTF {
                 let gene_id = extract_attribute(attributes, "gene_id").unwrap_or("unknown");
                 let gene_name = extract_attribute(attributes, "gene_name").unwrap_or("unknown");
 
+                let cleaned_gene_id: String = gene_id.chars()
+                    .filter(|&c| c != '"' && c != '\'')
+                    .collect();
+
+                let cleaned_gene_name: String = gene_name.chars()
+                    .filter(|&c| c != '"' && c != '\'')
+                    .collect();
+
                 // Call your add_exon function (you may want to add gene_name handling there)
-                self.add_exon(gene_id, gene_name, start, end, chromosome, orientation);
+                //println!("Adding gene {gene_id} - {gene_name}");
+                self.add_exon(&cleaned_gene_id, &cleaned_gene_name, start, end, chromosome, orientation);
             }
         }
 

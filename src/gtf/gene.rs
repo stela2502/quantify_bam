@@ -1,6 +1,7 @@
 use crate::gtf::ExonIterator;
 use crate::gtf::SplicedRead;
 use crate::gtf::exon_iterator::ReadResult;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Exon {
@@ -21,6 +22,15 @@ pub struct Gene {
     exons: Vec<Exon>, // New field to store exons
 }
 
+impl fmt::Display for Gene{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let ex = self.exons.len();
+        writeln!(f, "ID: {} name: {} {}-{} #exons: {}", self.gene_id, self.gene_name, self.start, self.end, ex )?;
+
+
+        Ok(())
+    }
+} 
 
 /// the order of these is from best to worst outcome
 #[derive(Debug, PartialEq, Clone, PartialOrd)]
@@ -42,6 +52,7 @@ impl RegionStatus {
 impl Gene {
     // Constructor for Gene
     pub fn new(gene_id: &str, gene_name: &str, start: usize, end: usize, sens_orientation: bool) -> Self {
+
         Gene {
             start,
             end,
@@ -146,6 +157,6 @@ impl Gene {
             RegionStatus::BeforeGene
         };
 
-        ReadResult { gene: self.gene_id.to_string(), match_type }
+        ReadResult { gene: self.gene_name.to_string(), match_type }
     }
 }
