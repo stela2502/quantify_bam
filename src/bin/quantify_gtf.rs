@@ -1,12 +1,14 @@
 use rustody::singlecelldata::SingleCellData;
 use rustody::singlecelldata::cell_data::GeneUmiHash;
+use rustody::int_to_str::IntToStr;
+use rustody::singlecelldata::IndexedGenes;
 
 use rustody::cellids::CellIds;
 use rustody::cellids10x::CellIds10x;
 use rustody::traits::CellIndex;
 use rustody::mapping_info::MappingInfo;
 
-use quantify_bam::gtf::{GTF, SplicedRead, ExonIterator};
+use quantify_bam::gtf::{GTF, SplicedRead, ExonIterator, RegionStatus};
 
 use bam::record::tags::StringType;
 
@@ -140,7 +142,8 @@ fn process_feature(
     bam_feature: &bam::Record, 
     gtf: &GTF, 
     iterator: &mut ExonIterator, 
-    gex: &mut SingleCellData, 
+    gex: &mut SingleCellData,
+    genes: &mut IndexedGenes,
     mapping_info: &mut MappingInfo,  // Now tracks errors using a HashMap
     chromosmome_mappings: &HashMap<i32, String>
 ) {
@@ -189,16 +192,33 @@ fn process_feature(
     
     // Generate a GeneUmiHash
     // This needs to be fixed - how do I use the genes here?! I totally forgot - but it should be rather straight forward!
-    let guh = GeneUmiHash(gene_id, umi.parse::<u64>().unwrap_or_default()); // Hash UMI as u64
+    #[cfg(debug_assertions)]
+    println!("Chr {chr}, cigar {cigar} and this start position {start} : CellID: {cell_id}");
+
+    let umi_u64 = IntToStr::new( umi.into(), 32 ).into_u64();
+
+    let gene_id_u64 = genes.get_gene_id( &gene_id );
+
+    let guh = GeneUmiHash(gene_id_u64, umi_u64 );
+
+    #[cfg(debug_assertions)]
+    println!("\t And I got a gene: {guh}");
 
     // Try to insert into SingleCellData (gex)
+    // the cellid is already a numeric!
+    let cell_id_u64:u64 =  match cell_id.parse::<u64>() {
+        Ok(number) => number,
+        Err(e) => IntToStr::new( cell_id.into(), 32).into_u64(),
+    };
+
     if !gex.try_insert(
-        &cell_id.parse::<u64>().unwrap_or_default(),  // Parse Cell ID as u64
+        &cell_id_u64,
         guh,
         mapping_info
     ) {
         mapping_info.report("UMI_duplicate");
     }
+    
 }
 
 
@@ -256,6 +276,8 @@ fn main() {
     let mut gex = SingleCellData::new(1);
     let mut last_chr = "".to_string();
 
+    let mut genes = IndexedGenes::empty( Some(0) );
+
     loop {
         match reader.read_into(&mut record) {
             Ok(true) => {},
@@ -283,7 +305,7 @@ fn main() {
         };
 
         if last_chr != chr {
-            gtf.init_search( &chr, start.try_into().unwrap(), &mut iterator );
+            let _ = gtf.init_search( &chr, start.try_into().unwrap(), &mut iterator );
         }
         last_chr = chr.to_string();
 
@@ -291,12 +313,22 @@ fn main() {
             &record, 
             &gtf, 
             &mut iterator, 
-            &mut gex, 
+            &mut gex,
+            &mut genes, 
             &mut mapping_info,  // Now tracks errors using a HashMap
             &ref_id_to_name,
         );
-        
+
     }
+
+    let file_path_sp = PathBuf::from(&opts.outpath).join(
+        "BD_Rhapsody_expression"
+        );
+
+    match gex.write_sparse_sub ( file_path_sp, &genes , &genes.get_all_gene_names(), opts.min_umi ) {
+        Ok(_) => (),
+        Err(err) => panic!("Error in the data write: {err}")
+    };
 
     match now.elapsed() {
         Ok(elapsed) => {
