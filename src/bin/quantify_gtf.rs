@@ -38,7 +38,7 @@ use std::time::SystemTime;
 
 use clap::Parser;
 
-
+const BUFFER_SIZE: usize = 1_000_000;
 
 
 
@@ -139,7 +139,11 @@ fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMa
 
 
 fn process_feature(
-    bam_feature: &bam::Record, 
+    cell_id: &str, 
+    umi: &str, 
+    start: i32, 
+    cigar: &str, 
+    chr: &str,
     gtf: &GTF, 
     iterator: &mut ExonIterator, 
     gex: &mut SingleCellData,
@@ -147,14 +151,6 @@ fn process_feature(
     mapping_info: &mut MappingInfo,  // Now tracks errors using a HashMap
     chromosmome_mappings: &HashMap<i32, String>
 ) {
-
-    let ( cell_id, umi, start, cigar, chr) = match get_values( bam_feature, chromosmome_mappings ){
-        Ok(res) => res,
-        Err(err) => {
-            mapping_info.report( err );
-            return;
-        }
-    };
 
     // Find the gene ID that overlaps or matches the region
     /*
@@ -228,6 +224,9 @@ fn main() {
     
     let opts: Opts = Opts::parse();
 
+    let mut mapping_info = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+    mapping_info.start_counter();
+
     if fs::metadata(&opts.outpath).is_err() {
         if let Err(err) = fs::create_dir_all(&opts.outpath) {
             eprintln!("Error creating directory {}: {}", &opts.outpath, err);
@@ -243,7 +242,6 @@ fn main() {
     let mut reader = bam::BamReader::from_path( &opts.bam , 1).unwrap();
     let header_view = reader.header().to_owned();  // Clone or use as needed
 
-
     // Create a HashMap to store reference ID to reference name
     let mut ref_id_to_name: HashMap<i32, String> = HashMap::new();
 
@@ -252,6 +250,7 @@ fn main() {
         //let name = String::from_utf8_lossy(name_bytes).to_string();
         ref_id_to_name.insert(id as i32, name.to_string());
     }
+
 
     let mut gtf = GTF::new(); 
 
@@ -270,8 +269,10 @@ fn main() {
     let split = 1_000_000_u64;
     let mut record = bam::Record::new();
 
-    let mut mapping_info = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+    let num_threads = rayon::current_num_threads(); 
+    let mut buffer = Vec::with_capacity(BUFFER_SIZE);
     
+
     let mut iterator = ExonIterator::new("main");
     let mut gex = SingleCellData::new(1);
     let mut last_chr = "unset".to_string();
@@ -284,41 +285,155 @@ fn main() {
             Ok(false) => break,
             Err(e) => panic!("{}", e),
         }
-        if lines % split == 0{
-            pb.set_message( format!("{} mio reads processed", lines / split) );
+
+        if lines % split == 0 {
+            pb.set_message(format!("{} mio reads processed", lines / split));
             pb.inc(1);
         }
-        lines +=1;
+        lines += 1;
 
-        let (cell_id, umi, start, cigar, chr) =  match get_values( &record, &ref_id_to_name ){
-            Ok((cell_id, umi, start, cigar, chr)) => {
-                // todo: get rid of that try_into(/) construct!
-                
-                (cell_id, umi, start, cigar, chr)
-
-            },
+        let data_tuple = match get_values( &record, &ref_id_to_name ){
+            Ok(res) => res,
             Err(err) => {
                 mapping_info.report( err );
-                continue;
-                // how do I progress the loop here?
+                return;
             }
         };
 
-        if last_chr != chr {
-            println!("Init chr!");
-            let _ = gtf.init_search( &chr, start.try_into().unwrap(), &mut iterator );
-        }
-        last_chr = chr.to_string();
+        buffer.push(data_tuple); // Store only the tuple in the buffer
 
-        process_feature( 
-            &record, 
-            &gtf, 
-            &mut iterator, 
-            &mut gex,
-            &mut genes, 
-            &mut mapping_info,  // Now tracks errors using a HashMap
-            &ref_id_to_name,
-        );
+        if buffer.len() == BUFFER_SIZE { 
+            mapping_info.stop_file_io_time();
+
+            let chunk_size = (buffer.len() / num_threads).max(1);
+
+            // Process the buffer in parallel
+            let results = buffer
+            .par_chunks(chunk_size)
+            .map(|chunk| {
+                let mut local_iterator = ExonIterator::new("part");// Initialize a thread-local iterator here if needed
+                let mut local_collector = SingleCellData::new(1);
+                let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+                let mut local_genes =  IndexedGenes::empty( Some(0) );
+
+                chunk.iter().for_each(|(cell_id, umi, start, cigar, chr)| {
+                    if last_chr != *chr {
+                        println!("Init chr!");
+                        let _ = gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator);
+                    }
+
+                    process_feature( 
+                        cell_id,
+                        umi,
+                        *start,
+                        cigar,
+                        chr,
+                        &gtf,
+                        &mut local_iterator,
+                        &mut local_collector,
+                        &mut local_genes,
+                        &mut local_report,
+                        &ref_id_to_name,
+                    );
+
+                });
+
+                return (local_collector, local_report, local_genes )
+            })
+            .collect::<Vec<_>>(); // Trigger computation
+
+            mapping_info.stop_multi_processor_time();
+
+            for result in results{
+                let translation = genes.merge( &result.2 );
+                gex.merge_re_id_genes( result.0, &translation );
+                mapping_info.merge( &result.1 );
+            }
+
+            buffer.clear(); // Clear the buffer after processing
+        }
+    }
+
+    if buffer.len() > num_threads { 
+        mapping_info.stop_file_io_time();
+
+        let chunk_size = (buffer.len() / num_threads).max(1);
+
+        // Process the buffer in parallel
+        let results = buffer
+        .par_chunks(chunk_size)
+        .map(|chunk| {
+            let mut local_iterator = ExonIterator::new("part");// Initialize a thread-local iterator here if needed
+            let mut local_collector = SingleCellData::new(1);
+            let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+            let mut local_genes =  IndexedGenes::empty( Some(0) );
+            let mut last_chr = "unset";
+            chunk.iter().for_each(|(cell_id, umi, start, cigar, chr)| {
+                if last_chr != *chr {
+                    let _ = gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator);
+                    last_chr = chr;
+                }
+
+                process_feature( 
+                    cell_id,
+                    umi,
+                    *start,
+                    cigar,
+                    chr,
+                    &gtf,
+                    &mut local_iterator,
+                    &mut local_collector,
+                    &mut local_genes,
+                    &mut local_report,
+                    &ref_id_to_name,
+                );
+
+            });
+
+            return (local_collector, local_report, local_genes )
+        })
+        .collect::<Vec<_>>(); // Trigger computation
+
+        mapping_info.stop_multi_processor_time();
+
+        for result in results{
+            let translation = genes.merge( &result.2 );
+            gex.merge_re_id_genes( result.0, &translation );
+            mapping_info.merge( &result.1 );
+        }
+
+    }else if buffer.len() > 0 {
+
+        let mut local_iterator = ExonIterator::new("part");// Initialize a thread-local iterator here if needed
+        let mut local_collector = SingleCellData::new(1);
+        let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+        let mut local_genes =  IndexedGenes::empty( Some(0) );
+
+        buffer.iter().for_each(|(cell_id, umi, start, cigar, chr)| {
+            if last_chr != *chr {
+                println!("Init chr!");
+                let _ = gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator);
+            }
+
+            process_feature( 
+                cell_id,
+                umi,
+                *start,
+                cigar,
+                chr,
+                &gtf,
+                &mut local_iterator,
+                &mut local_collector,
+                &mut genes,
+                &mut local_report,
+                &ref_id_to_name,
+            )
+
+        });
+
+        let translation = genes.merge( &local_genes );
+        gex.merge_re_id_genes( local_collector, &translation );
+        mapping_info.merge( &local_report );
 
     }
 
@@ -330,6 +445,8 @@ fn main() {
         Ok(_) => (),
         Err(err) => panic!("Error in the data write: {err}")
     };
+
+    println!("{}",mapping_info.program_states_string());
 
     match now.elapsed() {
         Ok(elapsed) => {
