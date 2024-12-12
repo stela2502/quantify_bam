@@ -224,9 +224,9 @@ fn process_feature(
         
         Some(read_result) => {
 
-            if read_result.sens_orientation == *is_reverse_strand {
-                if matches!(read_result.match_type, RegionStatus::ExtTag | RegionStatus::InsideExon) {
-                    mapping_info.report("Orientation mismatch");
+            if read_result.sens_orientation != *is_reverse_strand {
+                if ! matches!(read_result.match_type, RegionStatus::ExtTag | RegionStatus::InsideExon) {
+                    mapping_info.report(&format!("{:?} Orientation mismatch", read_result.match_type) );
                     return;
                 }
             }
@@ -374,7 +374,7 @@ fn main() {
     pb.set_style(spinner_style);
     pb.set_message( "" );
 
-    let mut lines = 0;
+    let mut lines = 0_u64;
     
     let mut record = bam::Record::new();
 
@@ -576,9 +576,13 @@ fn main() {
 
     }
 
+
+
     let file_path_sp = PathBuf::from(&opts.outpath).join(
         "BD_Rhapsody_expression"
         );
+
+    println!("Writing data to path {:?}", file_path_sp);
 
     match gex.write_sparse_sub ( file_path_sp, &genes , &genes.get_all_gene_names(), opts.min_umi ) {
         Ok(_) => (),
@@ -590,6 +594,8 @@ fn main() {
     println!("The total issues report:\n{}", mapping_info.report_to_string());
 
     println!("Runtime assessment:\n{}",mapping_info.program_states_string());
+
+    mapping_info.write_to_log( format!("Runtime assessment:\n{}",mapping_info.program_states_string()));
 
     match now.elapsed() {
         Ok(elapsed) => {
@@ -604,6 +610,7 @@ fn main() {
             let min = milli % 60;
             milli= (milli -min) /60;
 
+            mapping_info.write_to_log( format!("\nfinished in {milli}h {min}min {sec} sec {mil}milli sec\n") );
             println!("\nI have analyzed the bam file in {milli}h {min}min {sec} sec {mil}milli sec\n");
         },
         Err(e) => {println!("Error: {e:?}");}
