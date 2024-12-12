@@ -1,4 +1,4 @@
-use crate::gtf::ExonIterator;
+//use crate::gtf::ExonIterator;
 use crate::gtf::SplicedRead;
 use crate::gtf::exon_iterator::ReadResult;
 use std::fmt;
@@ -38,6 +38,7 @@ pub enum RegionStatus {
     InsideExon,
     SpanningBoundary,
     InsideIntron,
+    ExtTag,
     AfterGene,
     BeforeGene,
 }
@@ -126,6 +127,7 @@ impl Gene {
 
     pub fn match_to(&self, spliced_read: &SplicedRead) -> ReadResult {
         let mut has_partial_match = false;
+        #[allow(unused_variables)] //throws a warning otherwise...
         let mut fully_matched_exons = 0;
         let mut exon_matched = false;
 
@@ -157,6 +159,6 @@ impl Gene {
             RegionStatus::BeforeGene
         };
 
-        ReadResult { gene: self.gene_name.to_string(), match_type }
+        ReadResult { gene: self.gene_name.to_string(), sens_orientation: self.sens_orientation,  match_type }
     }
 }

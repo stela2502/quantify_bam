@@ -3,10 +3,10 @@ use core::fmt;
 
 use std::time::{SystemTime};
 
-use crate::gtf::{GTF, QueryErrors, RegionStatus};
+use crate::gtf::{RegionStatus};
 
 use std::collections::{VecDeque};
-use std::hash::{Hash, Hasher};
+use std::hash::{Hash};
 
 // Define a struct to represent the hashable index
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -18,6 +18,7 @@ pub struct ReadIndex {
 #[derive(Debug, Clone)]
 pub struct ReadResult {
     pub gene: String,
+    pub sens_orientation: bool,
     pub match_type: RegionStatus
 }
 

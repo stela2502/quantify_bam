@@ -3,33 +3,33 @@ use rustody::singlecelldata::cell_data::GeneUmiHash;
 use rustody::int_to_str::IntToStr;
 use rustody::singlecelldata::IndexedGenes;
 
-use rustody::cellids::CellIds;
-use rustody::cellids10x::CellIds10x;
-use rustody::traits::CellIndex;
+//use rustody::cellids::CellIds;
+//use rustody::cellids10x::CellIds10x;
+//use rustody::traits::CellIndex;
 use rustody::mapping_info::MappingInfo;
 
-use quantify_bam::gtf::{GTF, SplicedRead, ExonIterator, RegionStatus};
+use quantify_bam::gtf::{GTF, ExonIterator, RegionStatus };
 
 use bam::record::tags::StringType;
 
 extern crate bam;
 use bam::record::Record;
-use bam::record::tags::TagViewer;
+//use bam::record::tags::TagViewer;
 use bam::record::tags::TagValue;
 
 use crate::bam::RecordReader;
 
-use rustody::ofiles::{Ofiles, Fspot};
+//use rustody::ofiles::{Ofiles, Fspot};
 
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 
 use std::path::PathBuf;
 use std::fs;
 use std::fs::File;
-use std::path::Path;
-use std::io::Write;
+//use std::path::Path;
+//use std::io::Write;
 
-use std::thread;
+//use std::thread;
 use rayon::prelude::*;
 use rayon::slice::ParallelSlice;
 
@@ -58,6 +58,9 @@ struct Opts {
     #[clap(short, long)]
     outpath: String,
     /// the minimum (UMI) reads per cell (sample + genes + antibody combined)
+    #[clap(short, long)]
+    num_proc: Option<usize>,
+    /// used processor cores (default all)
     #[clap(short, long)]
     min_umi: usize,
     /// the version of beads you used v1, v2.96 or v2.384
@@ -96,15 +99,25 @@ fn get_tag(bam_feature: &Record, tag: &[u8;2]) -> Option<String> {
 }
 
 
-//fn get_values( bam_feature: &bam::Record, chromosmome_mappings:&HashMap<i32, String> ) 
-//        -> Result<( String, String, u32, String, String ), &str> {
+///fn get_values( bam_feature: &bam::Record, chromosmome_mappings:&HashMap<i32, String> ) 
+///        -> Result<( String, String, u32, String, String, bool ), &str> {
+/// with the return values being 
+/// ( CellID, UMI, start+1, Cigar, chromosome, flag().is_reverse_strand() )
 /// get_values is very specififc for this usage here - read bam reads and compare them to a gtf file
 /// Bam is 0-based start position and end exclusive whereas gtf is 1-based and end inclusive.
 /// This means that the end is actually the same value - just the start for GTF needs to be bam start +1
 /// That is what this function returns for a start!
 fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String> ) 
-         -> Result<( String, String, i32, String, String ), &'a str> {
-    
+         -> Result<( String, String, i32, String, String, bool ), &'a str> {
+
+    // Extract the chromosome (reference name)
+    let chr = match chromosmome_mappings.get( &bam_feature.ref_id() ){
+        Some(name) => name.to_string(),
+        None => {
+            return Err( "missing_Chromosome");  // Report missing chromosome
+        }
+    };
+
     let cell_id = match get_tag( bam_feature, b"CB" ) {
         Some(id) => id.to_string(), // Convert to string, or use empty string
         None => {
@@ -122,19 +135,11 @@ fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMa
         }
     };
 
-    // Extract the chromosome (reference name)
-    let chr = match chromosmome_mappings.get( &bam_feature.ref_id() ){
-        Some(name) => name.to_string(),
-        None => {
-            return Err( "missing_Chromosome");  // Report missing chromosome
-        }
-    };
-
     // Extract the start and end positions
     let start = bam_feature.start();  // BAM is 0-based, start is inclusive
     // crap - this needs to be computed from the CIGAR!!!!
 
-    Ok( ( cell_id, umi, start+1, bam_feature.cigar().to_string(), chr) ) // convert bam to gtf notation
+    Ok( ( cell_id, umi, start+1, bam_feature.cigar().to_string(), chr, bam_feature.flag().is_reverse_strand() ) ) // convert bam to gtf notation
 }
 
 
@@ -144,13 +149,15 @@ fn process_feature(
     start: i32, 
     cigar: &str, 
     chr: &str,
+    is_reverse_strand: &bool,
     gtf: &GTF, 
     iterator: &mut ExonIterator, 
     gex: &mut SingleCellData,
     genes: &mut IndexedGenes,
     mapping_info: &mut MappingInfo,  // Now tracks errors using a HashMap
-    chromosmome_mappings: &HashMap<i32, String>
-) {
+    //chromosmome_mappings: &HashMap<i32, String>
+)
+{
 
     // Find the gene ID that overlaps or matches the region
     /*
@@ -162,30 +169,120 @@ fn process_feature(
     BeforeGene,
     }
     */
+
+    /*
+
+    let read_result = match gtf.match_cigar_to_gene(&chr, &cigar, start.try_into().unwrap(), iterator) {
+        Some(result) => result,
+        None => {
+            mapping_info.report("missing_Gene");
+            return;
+        },
+    };
+    //
+    let orientation_mismatch = read_result.sens_orientation == *is_reverse_strand;
+
+    if read_result.sens_orientation == *is_reverse_strand
+ //       && matches!(read_result.match_type, RegionStatus::ExtTag | RegionStatus::InsideExon)
+    {
+        mapping_info.report("Orientation mismatch");
+        return;
+    }
+
+    let gene_suffix = match read_result.match_type {
+        //RegionStatus::InsideExon if read_result.sens_orientation == *is_reverse_strand => "_antisense",
+        RegionStatus::InsideExon => "",
+        RegionStatus::SpanningBoundary => "_unspliced",
+        RegionStatus::InsideIntron => "_unspliced",
+        RegionStatus::ExtTag => "_ext",
+        _ => {
+            mapping_info.report("missing_Gene");
+            return;
+        },
+    };
+
+    let gene_id = format!("{}{}", read_result.gene, gene_suffix);
+
+    #[cfg(debug_assertions)]
+    println!("Chr {chr}, cigar {cigar}, start {start} : CellID: {cell_id}");
+
+    let umi_u64 = IntToStr::new(umi.into(), 32).into_u64();
+    let cell_id_u64: u64 = cell_id
+        .parse::<u64>()
+        .unwrap_or_else(|_| IntToStr::new(cell_id.into(), 32).into_u64());
+
+    if !gex.try_insert(
+        &cell_id_u64,
+        GeneUmiHash(genes.get_gene_id(&gene_id), umi_u64),
+        mapping_info,
+    ) {
+        mapping_info.report("UMI_duplicate");
+    }
+}
+*/
     let gene_id = match gtf.match_cigar_to_gene(&chr, &cigar, start.try_into().unwrap() , iterator) {
+        
         Some(read_result) => {
+
+            if read_result.sens_orientation == *is_reverse_strand {
+                if matches!(read_result.match_type, RegionStatus::ExtTag | RegionStatus::InsideExon) {
+                    mapping_info.report("Orientation mismatch");
+                    return;
+                }
+            }
+            match read_result.match_type {
+                RegionStatus::InsideExon if read_result.sens_orientation != *is_reverse_strand => read_result.gene+"_antisense",
+                RegionStatus::InsideExon => read_result.gene,
+                RegionStatus::SpanningBoundary => read_result.gene+"_unspliced",
+                RegionStatus::InsideIntron => read_result.gene+"_unspliced",
+                RegionStatus::ExtTag => read_result.gene+"_ext",
+                _ => {
+                    mapping_info.report("missing_Gene");
+                    return;
+                },
+            }
+            //format!("{}{}", read_result.gene, gene_suffix)
+            /*
+            // takes too long to actually collect all this info.
+            // is not necessary after the debuging.
             match read_result.match_type{
+                
                 RegionStatus::InsideExon => {
-                    read_result.gene.to_string()
+                    if read_result.sens_orientation != *is_reverse_strand {
+                        read_result.gene.to_string() + "_antisense"
+                    }
+                    else {
+                        mapping_info.report("InsideExon"); 
+                        read_result.gene.to_string()
+                    }
                 },
                 RegionStatus::SpanningBoundary => {
+                    mapping_info.report("SpanningBoundary"); 
                     read_result.gene.to_string() + "_unspliced"
                 },
                 RegionStatus::InsideIntron => {
+                    mapping_info.report("InsideIntron"); 
                     read_result.gene.to_string() + "_unspliced"
-                }
+                },
+                RegionStatus::ExtTag => {
+                    mapping_info.report("ExtTag read");
+                    read_result.gene.to_string() + "_ext"
+                },
                 _ => {
                     mapping_info.report("missing_Gene");
                     return;
                 }
-            }
+            }*/
+            
         },  // Get the gene_id if found
         None => {
             mapping_info.report("missing_Gene");  // Report missing gene match
             return;
-        }
+        },
+
     };
     
+
     // Generate a GeneUmiHash
     // This needs to be fixed - how do I use the genes here?! I totally forgot - but it should be rather straight forward!
     #[cfg(debug_assertions)]
@@ -204,7 +301,7 @@ fn process_feature(
     // the cellid is already a numeric!
     let cell_id_u64:u64 =  match cell_id.parse::<u64>() {
         Ok(number) => number,
-        Err(e) => IntToStr::new( cell_id.into(), 32).into_u64(),
+        Err(_e) => IntToStr::new( cell_id.into(), 32).into_u64(),
     };
 
     if !gex.try_insert(
@@ -214,7 +311,7 @@ fn process_feature(
     ) {
         mapping_info.report("UMI_duplicate");
     }
-    
+
 }
 
 
@@ -224,9 +321,6 @@ fn main() {
     
     let opts: Opts = Opts::parse();
 
-    let mut mapping_info = MappingInfo::new( None, 3.0, opts.max_reads ,None );
-    mapping_info.start_counter();
-
     if fs::metadata(&opts.outpath).is_err() {
         if let Err(err) = fs::create_dir_all(&opts.outpath) {
             eprintln!("Error creating directory {}: {}", &opts.outpath, err);
@@ -235,7 +329,22 @@ fn main() {
         }
     }
 
-    println!("Analysis will stop after having processed {} fastq entries containing a cell info\n", opts.max_reads);
+    let log_file_str = PathBuf::from(&opts.outpath).join(
+        "Mapping_log.txt"
+    );
+
+    let log_file = match File::create( log_file_str ){
+            Ok(file) => file,
+            Err(err) => {
+            panic!("Log file creation Error: {err:#?}" );
+        }
+    };
+
+    let mut mapping_info = MappingInfo::new( Some(log_file), 3.0, opts.max_reads ,None );
+    mapping_info.start_counter();
+
+
+    //println!("Analysis will stop after having processed {} fastq entries containing a cell info\n", opts.max_reads);
 
     println!("reading GTF file");    
 
@@ -265,18 +374,24 @@ fn main() {
     pb.set_style(spinner_style);
     pb.set_message( "" );
 
-    let mut lines:u64 = 0;
-    let split = 1_000_000_u64;
+    let mut lines = 0;
+    
     let mut record = bam::Record::new();
 
-    let num_threads = rayon::current_num_threads(); 
+    let num_threads = match &opts.num_proc {
+        Some(n) => *n,
+        None => rayon::current_num_threads()
+    }; 
+
+    let split = BUFFER_SIZE * num_threads;
+
+    println!("Using {} processors", num_threads);
+
     let mut buffer = Vec::with_capacity(BUFFER_SIZE);
     
 
-    let mut iterator = ExonIterator::new("main");
+    //let mut iterator = ExonIterator::new("main");
     let mut gex = SingleCellData::new(1);
-    let mut last_chr = "unset".to_string();
-
     let mut genes = IndexedGenes::empty( Some(0) );
 
     loop {
@@ -286,14 +401,21 @@ fn main() {
             Err(e) => panic!("{}", e),
         }
 
-        if lines % split == 0 {
-            pb.set_message(format!("{} mio reads processed", lines / split));
+        if lines % 1_000_000 == 0 {
+            let info = format!("{} mio reads processed", lines / 1_000_000 );
+            pb.set_message( info.to_string() );
             pb.inc(1);
+            //mapping_info.write_to_log(info);
+            //mapping_info.log_report();
         }
         lines += 1;
 
         let data_tuple = match get_values( &record, &ref_id_to_name ){
             Ok(res) => res,
+            Err( "missing_Chromosome" ) => {
+                // We reached the end of the mapped reads - exit the loop
+                break;
+            }
             Err(err) => {
                 mapping_info.report( err );
                 return;
@@ -302,7 +424,12 @@ fn main() {
 
         buffer.push(data_tuple); // Store only the tuple in the buffer
 
-        if buffer.len() == BUFFER_SIZE { 
+        if buffer.len() == split {
+            let info = format!("{} mio reads -> processing", lines / 1_000_000 );
+            pb.set_message( info.to_string() );
+            pb.inc(1);
+            mapping_info.write_to_log(info);
+
             mapping_info.stop_file_io_time();
 
             let chunk_size = (buffer.len() / num_threads).max(1);
@@ -315,11 +442,12 @@ fn main() {
                 let mut local_collector = SingleCellData::new(1);
                 let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
                 let mut local_genes =  IndexedGenes::empty( Some(0) );
-
-                chunk.iter().for_each(|(cell_id, umi, start, cigar, chr)| {
+                let mut last_chr = "unset";
+                chunk.iter().for_each(|(cell_id, umi, start, cigar, chr, is_reverse_strand )| {
                     if last_chr != *chr {
-                        println!("Init chr!");
+                        //println!("Init chr!");
                         let _ = gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator);
+                        last_chr = chr;
                     }
 
                     process_feature( 
@@ -328,12 +456,13 @@ fn main() {
                         *start,
                         cigar,
                         chr,
+                        is_reverse_strand,
                         &gtf,
                         &mut local_iterator,
                         &mut local_collector,
                         &mut local_genes,
                         &mut local_report,
-                        &ref_id_to_name,
+                        //&ref_id_to_name,
                     );
 
                 });
@@ -349,12 +478,18 @@ fn main() {
                 gex.merge_re_id_genes( result.0, &translation );
                 mapping_info.merge( &result.1 );
             }
-
+            mapping_info.log_report();
             buffer.clear(); // Clear the buffer after processing
         }
     }
 
     if buffer.len() > num_threads { 
+        let info = format!("{} mio reads -> processing", lines / 1_000_000 );
+        pb.set_message( info.to_string() );
+        pb.inc(1);
+        mapping_info.write_to_log(info);
+        //mapping_info.log_report();
+
         mapping_info.stop_file_io_time();
 
         let chunk_size = (buffer.len() / num_threads).max(1);
@@ -368,7 +503,7 @@ fn main() {
             let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
             let mut local_genes =  IndexedGenes::empty( Some(0) );
             let mut last_chr = "unset";
-            chunk.iter().for_each(|(cell_id, umi, start, cigar, chr)| {
+            chunk.iter().for_each(|(cell_id, umi, start, cigar, chr, is_reverse_strand)| {
                 if last_chr != *chr {
                     let _ = gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator);
                     last_chr = chr;
@@ -380,12 +515,13 @@ fn main() {
                     *start,
                     cigar,
                     chr,
+                    is_reverse_strand,
                     &gtf,
                     &mut local_iterator,
                     &mut local_collector,
                     &mut local_genes,
                     &mut local_report,
-                    &ref_id_to_name,
+                    //&ref_id_to_name,
                 );
 
             });
@@ -408,10 +544,12 @@ fn main() {
         let mut local_collector = SingleCellData::new(1);
         let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
         let mut local_genes =  IndexedGenes::empty( Some(0) );
+        #[allow(unused_mut)]
+        let mut last_chr = "unset";
 
-        buffer.iter().for_each(|(cell_id, umi, start, cigar, chr)| {
+        buffer.iter().for_each(|(cell_id, umi, start, cigar, chr, is_reverse_strand)| {
             if last_chr != *chr {
-                println!("Init chr!");
+                //println!("Init chr!");
                 let _ = gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator);
             }
 
@@ -421,12 +559,13 @@ fn main() {
                 *start,
                 cigar,
                 chr,
+                is_reverse_strand,
                 &gtf,
                 &mut local_iterator,
                 &mut local_collector,
-                &mut genes,
+                &mut local_genes,
                 &mut local_report,
-                &ref_id_to_name,
+                //&ref_id_to_name,
             )
 
         });
@@ -446,7 +585,11 @@ fn main() {
         Err(err) => panic!("Error in the data write: {err}")
     };
 
-    println!("{}",mapping_info.program_states_string());
+    mapping_info.log_report();
+
+    println!("The total issues report:\n{}", mapping_info.report_to_string());
+
+    println!("Runtime assessment:\n{}",mapping_info.program_states_string());
 
     match now.elapsed() {
         Ok(elapsed) => {

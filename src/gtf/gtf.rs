@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::cmp::Ordering;
+//use std::cmp::Ordering;
 use std::error::Error;
 
 use std::path::Path;
@@ -63,7 +63,7 @@ impl GTF {
             chromosome_genes.push(new_gene);
         }
     }
-
+    /*
     fn sort_genes(&mut self) {
         for gene_exons in self.chromosomes.values_mut() {
             // Sort by gene start position, then exon start position
@@ -77,7 +77,7 @@ impl GTF {
             });
         }
     }
-
+    */
 
     pub fn slice_gtf(&self, chromosome: &str, start: usize, end: usize) -> Result<Vec<Gene>, &str> {
         // Check if the chromosome exists in the gtf
@@ -94,7 +94,7 @@ impl GTF {
             Err("Sorry this chromosome is not present here")
         }
     }
-
+    /*
     fn genes_overlapping(&self, chr:&str, initial_position:usize, final_position:usize, iterator: ExonIterator  )-> Vec<Gene> {
         let mut res: Vec<Gene> = Vec::new();
         
@@ -107,7 +107,7 @@ impl GTF {
         }
         res
     }   
-
+    */
     /// the main query functionality
     pub fn match_cigar_to_gene(&self, chr:&str, cigar: &str, initial_position: usize, 
         iterator: &mut ExonIterator ) -> Option<ReadResult> {
@@ -153,7 +153,11 @@ impl GTF {
                 }
             }
             //panic!("One is enough here!");
-        };
+        }else {
+            //println!("ExtTag {chr} with start {initial_position} and cigar {cigar}");
+            let res = ReadResult { gene: chr.to_string(), sens_orientation: true,  match_type: RegionStatus::ExtTag };
+            results.push( res );
+        }
         // now we have a best matching gene as 
         if ! results.is_empty() {
             //println!("We found a match!");
