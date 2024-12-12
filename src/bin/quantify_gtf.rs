@@ -387,7 +387,7 @@ fn main() {
 
     println!("Using {} processors", num_threads);
 
-    let mut buffer = Vec::with_capacity(BUFFER_SIZE);
+    let mut buffer = Vec::with_capacity(split);
     
 
     //let mut iterator = ExonIterator::new("main");
