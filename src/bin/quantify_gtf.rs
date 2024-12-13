@@ -43,7 +43,7 @@ const BUFFER_SIZE: usize = 1_000_000;
 
 
 #[derive(Parser)]
-#[clap(version = "1.2.5", author = "Stefan L. <stefan.lang@med.lu.se>")]
+#[clap(version = "0.4.0", author = "Stefan L. <stefan.lang@med.lu.se>")]
 struct Opts {
     /// the bam file to quantify
     #[clap(short, long)]
