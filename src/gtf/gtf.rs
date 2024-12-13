@@ -271,7 +271,11 @@ impl GTF {
 
             let chromosome = fields[0].to_string();
             let feature_type = fields[2];
-            let orientation = fields[7] == "+";
+            let orientation = match fields[6]{
+                "+" => true,
+                "-" => false,
+                _ => panic!("field[7] should not contain this value: {}",fields[6]),
+            };
 
             if feature_type == "exon" {
                 let start: usize = fields[3].parse()?;

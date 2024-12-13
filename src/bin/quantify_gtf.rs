@@ -138,8 +138,14 @@ fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMa
     // Extract the start and end positions
     let start = bam_feature.start();  // BAM is 0-based, start is inclusive
     // crap - this needs to be computed from the CIGAR!!!!
+    //let mut output = Vec::new();
+    //bam_feature.write_sam(&mut output).expect("Failed to write SAM");
+    /*println!("This bam record {:?} was parsed into that tupel {:?}", 
+        bam_feature, 
+        ( &cell_id, &umi, start+1, &bam_feature.cigar().to_string(), &chr, &bam_feature.flag().is_reverse_strand() ) 
+    );*/
 
-    Ok( ( cell_id, umi, start+1, bam_feature.cigar().to_string(), chr, bam_feature.flag().is_reverse_strand() ) ) // convert bam to gtf notation
+    Ok( ( cell_id, umi, start+1, bam_feature.cigar().to_string(), chr,  bam_feature.flag().is_reverse_strand() ) ) // convert bam to gtf notation
 }
 
 
@@ -223,18 +229,32 @@ fn process_feature(
     let gene_id = match gtf.match_cigar_to_gene(&chr, &cigar, start.try_into().unwrap() , iterator) {
         
         Some(read_result) => {
+            /*
+            A00681:1014:HWGVKDMXY:2:2146:22064:36855    0   chr6    70703449    255 71M *   0   0   TCCCTGCATCCAGTGAGCAGTTAACATCTGGAGGTGCCTCAGTCGTGTGCTTCTTGAACAACTTCTACCCC FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF::FFFFFFFFF:FFFFFFF:FFFFFFFFF NH:i:1  HI:i:1  AS:i:65 nM:i:2  XF:Z:Igkc   TR:Z:*  TF:Z:*  CB:Z:39780979   MR:Z:AATCGAAC   CN:Z:T  ST:Z:03 UB:Z:AATCGAAC
+            Checking reads orientation: false vs gtf's orientation (id true): Igkc
 
-            if read_result.sens_orientation != *is_reverse_strand {
-                if ! matches!(read_result.match_type, RegionStatus::ExtTag | RegionStatus::InsideExon) {
+            Checking reads orientation: true vs gtf's orientation (id false): Ighg1
+            A00681:1014:HWGVKDMXY:2:2144:12608:13495    16  chr12   113294085   255 60M11S  *   0   0   GTTAGTTTGGGCAGCAGATCCAGGGGCCAGTGGATAGACAGATGGGGGTGTCGTTTTGGCAGAGGCGACGG FF:FF:FF:FFFFFFFFFFFFFFFFFFFFFF:FFFFFFFFFFFFFFFFF:FFF,FFFFFFFFFFFFFFFFF NH:i:1  HI:i:1  AS:i:59 nM:i:0  XF:Z:Ighg1  TR:Z:*  TF:Z:*  CB:Z:42250405   MR:Z:CTTGGATT   CN:Z:T  ST:Z:04 UB:Z:CTTGGATT
+
+            */
+            //println!("Checking reads orientation: {} vs gtf's orientation (id {}): {}", is_reverse_strand , read_result.sens_orientation, read_result.gene);
+            if read_result.sens_orientation == *is_reverse_strand { // antisense read!
+                //println!("Is antisense!");
+                if matches!(read_result.match_type,  RegionStatus::InsideIntron) {
                     mapping_info.report(&format!("{:?} Orientation mismatch", read_result.match_type) );
                     return;
                 }
             }
+            let add = if read_result.sens_orientation == *is_reverse_strand{
+                "_antisense"
+            }else {
+                ""
+            };
+
             match read_result.match_type {
-                RegionStatus::InsideExon if read_result.sens_orientation != *is_reverse_strand => read_result.gene+"_antisense",
-                RegionStatus::InsideExon => read_result.gene,
-                RegionStatus::SpanningBoundary => read_result.gene+"_unspliced",
-                RegionStatus::InsideIntron => read_result.gene+"_unspliced",
+                RegionStatus::InsideExon => read_result.gene + add,
+                RegionStatus::SpanningBoundary => read_result.gene+"_unspliced" +add,
+                RegionStatus::InsideIntron => read_result.gene+"_unspliced" +add,
                 RegionStatus::ExtTag => read_result.gene+"_ext",
                 _ => {
                     mapping_info.report("missing_Gene");
