@@ -51,9 +51,6 @@ struct Opts {
     /// the gtf file fitting to the Bam file
     #[clap(short, long)]
     gtf: String,
-    /// the specie of the library [mouse, human]
-    #[clap(short, long)]
-    specie: String,
     /// the outpath
     #[clap(short, long)]
     outpath: String,
@@ -63,15 +60,6 @@ struct Opts {
     /// used processor cores (default all)
     #[clap(short, long)]
     min_umi: usize,
-    /// the version of beads you used v1, v2.96 or v2.384
-    #[clap(short, long)]
-    version: String,
-    /// Optional: end the analysis after processing <max_reads> cell fastq entries 
-    #[clap(default_value_t=usize::MAX, long)]
-    max_reads: usize,
-    /// this is a BD rhapsody or a 10x expression experiment? 
-    #[clap(default_value="bd", long)]
-    exp: String,
 }
 
 
@@ -360,7 +348,7 @@ fn main() {
         }
     };
 
-    let mut mapping_info = MappingInfo::new( Some(log_file), 3.0, opts.max_reads ,None );
+    let mut mapping_info = MappingInfo::new( Some(log_file), 3.0, 0 ,None );
     mapping_info.start_counter();
 
 
@@ -460,7 +448,7 @@ fn main() {
             .map(|chunk| {
                 let mut local_iterator = ExonIterator::new("part");// Initialize a thread-local iterator here if needed
                 let mut local_collector = SingleCellData::new(1);
-                let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+                let mut local_report = MappingInfo::new( None, 3.0, 0 ,None );
                 let mut local_genes =  IndexedGenes::empty( Some(0) );
                 let mut last_chr = "unset";
                 chunk.iter().for_each(|(cell_id, umi, start, cigar, chr, is_reverse_strand )| {
@@ -520,7 +508,7 @@ fn main() {
         .map(|chunk| {
             let mut local_iterator = ExonIterator::new("part");// Initialize a thread-local iterator here if needed
             let mut local_collector = SingleCellData::new(1);
-            let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+            let mut local_report = MappingInfo::new( None, 3.0, 0 ,None );
             let mut local_genes =  IndexedGenes::empty( Some(0) );
             let mut last_chr = "unset";
             chunk.iter().for_each(|(cell_id, umi, start, cigar, chr, is_reverse_strand)| {
@@ -562,7 +550,7 @@ fn main() {
 
         let mut local_iterator = ExonIterator::new("part");// Initialize a thread-local iterator here if needed
         let mut local_collector = SingleCellData::new(1);
-        let mut local_report = MappingInfo::new( None, 3.0, opts.max_reads ,None );
+        let mut local_report = MappingInfo::new( None, 3.0, 0 ,None );
         let mut local_genes =  IndexedGenes::empty( Some(0) );
         #[allow(unused_mut)]
         let mut last_chr = "unset";

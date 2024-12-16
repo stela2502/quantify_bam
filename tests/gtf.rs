@@ -3,9 +3,7 @@
 #[cfg(test)]
 mod tests {
     use quantify_bam::gtf::GTF;
-    use quantify_bam::gtf::ExonIterator;
-    use quantify_bam::gtf::RegionStatus;
-    use quantify_bam::gtf::QueryErrors;
+
 
 
     #[test]
