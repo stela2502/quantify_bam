@@ -43,7 +43,7 @@ const BUFFER_SIZE: usize = 1_000_000;
 
 
 #[derive(Parser)]
-#[clap(version = "0.4.0", author = "Stefan L. <stefan.lang@med.lu.se>")]
+#[clap(version = "0.4.1", author = "Stefan L. <stefan.lang@med.lu.se>")]
 struct Opts {
     /// the bam file to quantify
     #[clap(short, long)]
@@ -60,6 +60,9 @@ struct Opts {
     /// used processor cores (default all)
     #[clap(short, long)]
     min_umi: usize,
+    /// tag name for the UMI information (default UB for CellRanger Bam files)
+    #[clap(short, long)]
+    umi_tag:Option<String>,
 }
 
 
@@ -95,7 +98,7 @@ fn get_tag(bam_feature: &Record, tag: &[u8;2]) -> Option<String> {
 /// Bam is 0-based start position and end exclusive whereas gtf is 1-based and end inclusive.
 /// This means that the end is actually the same value - just the start for GTF needs to be bam start +1
 /// That is what this function returns for a start!
-fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String> ) 
+fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String>, bam_ub_tag:&[u8;2] ) 
          -> Result<( String, String, i32, String, String, bool ), &'a str> {
 
     // Extract the chromosome (reference name)
@@ -116,7 +119,7 @@ fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMa
     };
 
     // Try to extract the UMI (UB), and report if missing
-    let umi = match get_tag( bam_feature, b"UB" ) {
+    let umi = match get_tag( bam_feature, bam_ub_tag ) {
         Some(u) => u.to_string(), // Convert to string, or use empty string
         None => {
             return Err( "missing_UMI");  // Report missing UMI
@@ -348,6 +351,14 @@ fn main() {
         }
     };
 
+    let umi_tag:[u8;2] = match opts.umi_tag{
+        Some(tag) => match tag.into_bytes().as_slice() {
+                [a, b] => [*a, *b],
+                _ => panic!("umi-tag must be exactly 2 chars long"),
+            },
+            None => *b"UB"
+    };
+
     let mut mapping_info = MappingInfo::new( Some(log_file), 3.0, 0 ,None );
     mapping_info.start_counter();
 
@@ -418,7 +429,7 @@ fn main() {
         }
         lines += 1;
 
-        let data_tuple = match get_values( &record, &ref_id_to_name ){
+        let data_tuple = match get_values( &record, &ref_id_to_name, &umi_tag ){
             Ok(res) => res,
             Err( "missing_Chromosome" ) => {
                 // We reached the end of the mapped reads - exit the loop
