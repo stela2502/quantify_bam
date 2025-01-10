@@ -1,7 +1,5 @@
 
 use std::collections::HashMap;
-use std::time::SystemTime;
-use std::path::PathBuf;
 
 use rayon::slice::ParallelSlice;
 use rayon::iter::ParallelIterator;
@@ -25,10 +23,7 @@ use crate::bam_helper::DataTuple;
 
 
 //extern crate bam;
-use bam::record::Record;
 //use bam::record::tags::TagViewer;
-use bam::record::tags::TagValue;
-use bam::record::tags::StringType;
 use bam::RecordReader;
 use bam::Header;
 
@@ -238,7 +233,10 @@ fn process_chunk(chunk: &[DataTuple], gtf: &GTF) -> (SingleCellData, MappingInfo
 
     for (cell_id, umi, start, cigar, chr, is_reverse_strand) in chunk {
         if last_chr != *chr {
-            gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator).unwrap();
+            match gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator){
+                Ok(_) => {},
+                Err(e) => panic!("Does the GTF match to the bam file?! ({:?}",e)
+            };
             last_chr = chr;
         }
 
