@@ -18,7 +18,7 @@ use rustody::mapping_info::MappingInfo;
 use rustody::int_to_str::IntToStr;
 use rustody::singlecelldata::cell_data::GeneUmiHash;
 
-use crate::bam_helper::get_values;
+use crate::bam_helper::{get_values, get_values_bulk};
 use crate::bam_helper::DataTuple;
 
 
@@ -137,6 +137,7 @@ pub fn process_data(
     bam_file: &str,
     mapping_info: &mut MappingInfo,
     gtf: &GTF,
+    cell_tag: [u8; 2],
     umi_tag: [u8; 2],
     num_threads: usize,
 )  -> ( SingleCellData, IndexedGenes ) {
@@ -155,7 +156,7 @@ pub fn process_data(
     let mut record = bam::Record::new();
     let split = BUFFER_SIZE * num_threads;
 
-    println!("Using {} processors", num_threads);
+    println!("Using {} processors and processinf {} reads a batch", num_threads, split);
 
     let mut buffer = Vec::with_capacity(split);
     let mut gex = SingleCellData::new(1);
@@ -174,13 +175,14 @@ pub fn process_data(
         }
         lines += 1;
 
-        let data_tuple = match get_values(&record, &ref_id_to_name, &umi_tag) {
+        let data_tuple = match get_values(&record, &ref_id_to_name, &cell_tag, &umi_tag) {
             Ok(res) => res,
             Err("missing_Chromosome") => {
                 eprintln!("Missing chromosome for BAM entry - assuming end of usable data.\n{:?}", record);
                 break;
             }
             Err(err) => {
+                //println!("error {err:?}");
                 mapping_info.report(err);
                 continue;
             }
@@ -188,14 +190,92 @@ pub fn process_data(
 
         buffer.push(data_tuple);
 
-        if buffer.len() == split {
+        if buffer.len() >= split {
+            pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
             process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
+            pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
             buffer.clear();
         }
     }
 
     if !buffer.is_empty() {
+        pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
         process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
+        pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+    }
+    return ( gex, genes )
+}
+
+// Function to process data
+pub fn process_data_bulk(
+    bam_file: &str,
+    mapping_info: &mut MappingInfo,
+    gtf: &GTF,
+    cell_tag: [u8; 2],
+    umi_tag: [u8; 2],
+    num_threads: usize,
+)  -> ( SingleCellData, IndexedGenes ) {
+
+
+    let mut reader = bam::BamReader::from_path( bam_file, 1).unwrap();
+    let header_view = reader.header().to_owned();
+    let ref_id_to_name = create_ref_id_to_name_map(&header_view);
+
+    let m = MultiProgress::new();
+    let pb = m.add(ProgressBar::new(5000));
+    pb.set_style(ProgressStyle::default_bar().template("{prefix:.bold.dim} {spinner} {wide_msg}").unwrap());
+    pb.set_message("");
+
+    let mut lines = 0_u64;
+    let mut record = bam::Record::new();
+    let split = BUFFER_SIZE * num_threads;
+
+    println!("Using {} processors and processinf {} reads a batch", num_threads, split);
+
+    let mut buffer = Vec::with_capacity(split);
+    let mut gex = SingleCellData::new(1);
+    let mut genes = IndexedGenes::empty(Some(0));
+
+    loop {
+        match reader.read_into(&mut record) {
+            Ok(true) => {},
+            Ok(false) => break,
+            Err(e) => panic!("{}", e),
+        }
+
+        if lines % 1_000_000 == 0 {
+            pb.set_message(format!("{} mio reads processed", lines / 1_000_000));
+            pb.inc(1);
+        }
+        lines += 1;
+
+        let data_tuple = match get_values_bulk(&record, &ref_id_to_name, &cell_tag, &umi_tag) {
+            Ok(res) => res,
+            Err("missing_Chromosome") => {
+                eprintln!("Missing chromosome for BAM entry - assuming end of usable data.\n{:?}", record);
+                break;
+            }
+            Err(err) => {
+                //println!("error {err:?}");
+                mapping_info.report(err);
+                continue;
+            }
+        };
+
+        buffer.push(data_tuple);
+
+        if buffer.len() >= split {
+            pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
+            process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
+            pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+            buffer.clear();
+        }
+    }
+
+    if !buffer.is_empty() {
+        pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
+        process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
+        pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
     }
     return ( gex, genes )
 }
@@ -235,7 +315,11 @@ fn process_chunk(chunk: &[DataTuple], gtf: &GTF) -> (SingleCellData, MappingInfo
         if last_chr != *chr {
             match gtf.init_search(chr, (*start).try_into().unwrap(), &mut local_iterator){
                 Ok(_) => {},
-                Err(e) => panic!("Does the GTF match to the bam file?! ({:?}",e)
+                Err(e) => {
+                    local_report.report( &format!("{:?}", e) );
+                    continue;
+                    //panic!("Does the GTF match to the bam file?! ({:?})",e)
+                },
             };
             last_chr = chr;
         }

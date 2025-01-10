@@ -44,6 +44,9 @@ struct Opts {
     /// used processor cores (default all)
     #[clap(short, long)]
     min_umi: usize,
+    /// tag name for the CELL information (default CB for CellRanger Bam files)
+    #[clap(short, long)]
+    cell_tag:Option<String>,
     /// tag name for the UMI information (default UB for CellRanger Bam files)
     #[clap(short, long)]
     umi_tag:Option<String>,
@@ -68,6 +71,7 @@ fn main() {
     let log_file_str = PathBuf::from(&opts.outpath).join("Mapping_log.txt");
     let log_file = File::create(log_file_str).expect("Failed to create log file");
     let umi_tag: [u8; 2] = opts.umi_tag.unwrap_or_else(|| "UB".to_string()).into_bytes().try_into().expect("umi-tag must be exactly 2 chars long");
+    let cell_tag: [u8; 2] = opts.cell_tag.unwrap_or_else(|| "CB".to_string()).into_bytes().try_into().expect("umi-tag must be exactly 2 chars long");
 
     let num_threads = opts.num_proc.unwrap_or_else(rayon::current_num_threads);
 
@@ -86,6 +90,7 @@ fn main() {
         &opts.bam,
         &mut mapping_info,
         &gtf,
+        cell_tag,
         umi_tag,
         num_threads
     );
@@ -95,8 +100,14 @@ fn main() {
     let file_path_sp = PathBuf::from(&opts.outpath).join("BD_Rhapsody_expression");
     println!("Writing data to path {:?}", file_path_sp);
 
-    gex.write_sparse_sub(file_path_sp, &genes, &genes.get_all_gene_names(), opts.min_umi).unwrap();
-    mapping_info.log_report();
+   
+
+    let info = match gex.write_sparse_sub(file_path_sp, &genes, &genes.get_all_gene_names(), opts.min_umi){
+        Ok(i) => i,
+        Err(e) => panic!("While writing the data an error occures: {e:?} "),
+    };
+    mapping_info.write_to_log( info );
+    mapping_info.log_report( );
 
     println!("The total issues report:\n{}", mapping_info.report_to_string());
     println!("Runtime assessment:\n{}", mapping_info.program_states_string());

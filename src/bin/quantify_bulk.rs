@@ -4,7 +4,7 @@ use clap::Parser;
 use rustody::mapping_info::MappingInfo;
 
 use quantify_bam::gtf::GTF;
-use quantify_bam::main_logics::{process_data};
+use quantify_bam::main_logics::{process_data_bulk};
 
 extern crate bam;
 
@@ -73,10 +73,10 @@ fn main() {
     
 
     let mut gtf = GTF::new();
-    gtf.parse_gtf_only_exons(&opts.gtf).unwrap();
+    gtf.parse_gtf(&opts.gtf).unwrap();
 
     // Process data
-    let (mut gex, genes) = process_data(
+    let (mut gex, genes) = process_data_bulk(
         &opts.bam,
         &mut mapping_info,
         &gtf,

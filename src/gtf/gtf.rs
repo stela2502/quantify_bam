@@ -48,6 +48,16 @@ impl GTF {
         }
     }
 
+    pub fn add_lone_exon(&mut self, gene_id: &str, gene_name: &str, start: usize, end: usize, chromosome: String, sens_orientation: bool) {
+        // Get the vector of genes for the specified chromosome
+        let chromosome_genes = self.chromosomes.entry(chromosome.clone()).or_insert(Vec::new());
+        
+        let mut new_gene = Gene::new(gene_id, gene_name, start, end, sens_orientation);
+        new_gene.add_exon(start, end);
+        chromosome_genes.push(new_gene);
+        
+    }
+
     pub fn add_exon(&mut self, gene_id: &str, gene_name: &str, start: usize, end: usize, chromosome: String, sens_orientation: bool) {
         // Get the vector of genes for the specified chromosome
         let chromosome_genes = self.chromosomes.entry(chromosome.clone()).or_insert(Vec::new());
@@ -236,6 +246,74 @@ impl GTF {
             }
         }
     }
+
+    // This collects exons from a TE gtf
+    pub fn parse_gtf_only_exons(&mut self, file_path: &str) -> Result<(), Box<dyn Error>> {
+        let path = Path::new(file_path);
+        let file = File::open(&path)?;
+        let reader = BufReader::new(file);
+
+        // Helper function to extract specific attributes like gene_id or gene_name
+        fn extract_attribute<'a>(attributes: &'a str, key: &'a str) -> Option< &'a str > {
+            attributes
+                .split(';')
+                .find_map(|attr| {
+                    let mut parts = attr.trim().split_whitespace();
+                    if let Some(attr_key) = parts.next() {
+                        if attr_key == key {
+                            return parts.next(); // Get the value after the key
+                        }
+                    }
+                    None
+                })
+        }
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.starts_with('#') {
+                continue; // Skip comment lines
+            }
+
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() < 9 {
+                continue; // Skip malformed lines
+            }
+
+            let chromosome = fields[0].to_string();
+            let feature_type = fields[2];
+            let orientation = match fields[6]{
+                "+" => true,
+                "-" => false,
+                _ => panic!("field[7] should not contain this value: {}",fields[6]),
+            };
+
+            if feature_type == "exon" {
+                let start: usize = fields[3].parse()?;
+                let end: usize = fields[4].parse()?;
+
+                // Extract gene_id and gene_name from the attributes
+                let attributes = fields[8];
+                let gene_id = extract_attribute(attributes, "gene_id").unwrap_or("unknown");
+                let gene_name = extract_attribute(attributes, "gene_name").unwrap_or("unknown");
+
+                let cleaned_gene_id: String = gene_id.chars()
+                    .filter(|&c| c != '"' && c != '\'')
+                    .collect();
+
+                let cleaned_gene_name: String = gene_name.chars()
+                    .filter(|&c| c != '"' && c != '\'')
+                    .collect();
+
+                // Call your add_exon function (you may want to add gene_name handling there)
+                //println!("Adding gene {gene_id} - {gene_name}");
+                self.add_lone_exon(&cleaned_gene_id, &cleaned_gene_name, start, end, chromosome, orientation);
+            }
+        }
+
+        println!("I have read this:\n{}", self);
+        Ok(())
+    }
+
 
     // Function to parse the GTF file and populate the Gtf structure
     pub fn parse_gtf(&mut self, file_path: &str) -> Result<(), Box<dyn Error>> {
