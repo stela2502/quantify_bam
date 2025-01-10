@@ -9,14 +9,11 @@ use rustody::singlecelldata::IndexedGenes;
 use rustody::mapping_info::MappingInfo;
 
 use quantify_bam::gtf::{GTF, ExonIterator, RegionStatus };
-
-use bam::record::tags::StringType;
+use quantify_bam::bam_helper::{ get_values, DataTuple };
+use quantify_bam::main_logics::{process_data};
+//use quantify_bam::main_logics::bam::RecordReader;
 
 extern crate bam;
-use bam::record::Record;
-//use bam::record::tags::TagViewer;
-use bam::record::tags::TagValue;
-
 use crate::bam::RecordReader;
 
 //use rustody::ofiles::{Ofiles, Fspot};
@@ -26,8 +23,6 @@ use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
 use std::path::PathBuf;
 use std::fs;
 use std::fs::File;
-//use std::path::Path;
-//use std::io::Write;
 
 //use std::thread;
 use rayon::prelude::*;
@@ -37,8 +32,6 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use clap::Parser;
-
-const BUFFER_SIZE: usize = 1_000_000;
 
 
 
@@ -66,264 +59,61 @@ struct Opts {
 }
 
 
-/*
-pub enum TagValue<'a> {
-    Char(u8),
-    Int(i64, IntegerType),
-    Float(f32),
-    String(&'a [u8], StringType),
-    IntArray(IntArrayView<'a>),
-    FloatArray(FloatArrayView<'a>),
-*/
+// Main function
+fn main() {
+    let now = SystemTime::now();
+    let opts: Opts = Opts::parse();
 
-/// get_tag will only return string tags - integer or floats nbeed to be implemented when needed.
-fn get_tag(bam_feature: &Record, tag: &[u8;2]) -> Option<String> {
-    match bam_feature.tags().get(tag) {
-        Some(TagValue::String(s, StringType::String)) => {
-            String::from_utf8(s.to_vec()).ok()
-        }, // Handle String directly
-        Some(TagValue::String(bytes, StringType::Hex )) => Some(
-            bytes.iter().map(|b| format!("{:02X}", b)).collect() // Convert byte array to hex string
-        ),
-        _ => None, // Return None for non-string-like types
-    }
-}
-
-
-///fn get_values( bam_feature: &bam::Record, chromosmome_mappings:&HashMap<i32, String> ) 
-///        -> Result<( String, String, u32, String, String, bool ), &str> {
-/// with the return values being 
-/// ( CellID, UMI, start+1, Cigar, chromosome, flag().is_reverse_strand() )
-/// get_values is very specififc for this usage here - read bam reads and compare them to a gtf file
-/// Bam is 0-based start position and end exclusive whereas gtf is 1-based and end inclusive.
-/// This means that the end is actually the same value - just the start for GTF needs to be bam start +1
-/// That is what this function returns for a start!
-fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String>, bam_ub_tag:&[u8;2] ) 
-         -> Result<( String, String, i32, String, String, bool ), &'a str> {
-
-    // Extract the chromosome (reference name)
-    let chr = match chromosmome_mappings.get( &bam_feature.ref_id() ){
-        Some(name) => name.to_string(),
-        None => {
-            return Err( "missing_Chromosome");  // Report missing chromosome
+    // Create output directory if needed
+    if fs::metadata(&opts.outpath).is_err() {
+        if let Err(err) = fs::create_dir_all(&opts.outpath) {
+            eprintln!("Error creating directory {}: {}", &opts.outpath, err);
+        } else {
+            println!("New output directory created successfully!");
         }
-    };
-
-    let cell_id = match get_tag( bam_feature, b"CB" ) {
-        Some(id) => id.to_string(), // Convert to string, or use empty string
-        None => {
-            return Err( "missing_CellID" )
-            //mapping_info.report("missing_CellID");  // Report missing Cell ID
-            //return;
-        }
-    };
-
-    // Try to extract the UMI (UB), and report if missing
-    let umi = match get_tag( bam_feature, bam_ub_tag ) {
-        Some(u) => u.to_string(), // Convert to string, or use empty string
-        None => {
-            return Err( "missing_UMI");  // Report missing UMI
-        }
-    };
-
-    // Extract the start and end positions
-    let start = bam_feature.start();  // BAM is 0-based, start is inclusive
-    // crap - this needs to be computed from the CIGAR!!!!
-    //let mut output = Vec::new();
-    //bam_feature.write_sam(&mut output).expect("Failed to write SAM");
-    /*println!("This bam record {:?} was parsed into that tupel {:?}", 
-        bam_feature, 
-        ( &cell_id, &umi, start+1, &bam_feature.cigar().to_string(), &chr, &bam_feature.flag().is_reverse_strand() ) 
-    );*/
-
-    Ok( ( cell_id, umi, start+1, bam_feature.cigar().to_string(), chr,  bam_feature.flag().is_reverse_strand() ) ) // convert bam to gtf notation
-}
-
-
-fn process_feature(
-    cell_id: &str, 
-    umi: &str, 
-    start: i32, 
-    cigar: &str, 
-    chr: &str,
-    is_reverse_strand: &bool,
-    gtf: &GTF, 
-    iterator: &mut ExonIterator, 
-    gex: &mut SingleCellData,
-    genes: &mut IndexedGenes,
-    mapping_info: &mut MappingInfo,  // Now tracks errors using a HashMap
-    //chromosmome_mappings: &HashMap<i32, String>
-)
-{
-
-    // Find the gene ID that overlaps or matches the region
-    /*
-    pub enum RegionStatus {
-    InsideExon,
-    SpanningBoundary,
-    InsideIntron,
-    AfterGene,
-    BeforeGene,
-    }
-    */
-
-    /*
-
-    let read_result = match gtf.match_cigar_to_gene(&chr, &cigar, start.try_into().unwrap(), iterator) {
-        Some(result) => result,
-        None => {
-            mapping_info.report("missing_Gene");
-            return;
-        },
-    };
-    //
-    let orientation_mismatch = read_result.sens_orientation == *is_reverse_strand;
-
-    if read_result.sens_orientation == *is_reverse_strand
- //       && matches!(read_result.match_type, RegionStatus::ExtTag | RegionStatus::InsideExon)
-    {
-        mapping_info.report("Orientation mismatch");
-        return;
     }
 
-    let gene_suffix = match read_result.match_type {
-        //RegionStatus::InsideExon if read_result.sens_orientation == *is_reverse_strand => "_antisense",
-        RegionStatus::InsideExon => "",
-        RegionStatus::SpanningBoundary => "_unspliced",
-        RegionStatus::InsideIntron => "_unspliced",
-        RegionStatus::ExtTag => "_ext",
-        _ => {
-            mapping_info.report("missing_Gene");
-            return;
-        },
-    };
+    // Set up logging
+    let log_file_str = PathBuf::from(&opts.outpath).join("Mapping_log.txt");
+    let log_file = File::create(log_file_str).expect("Failed to create log file");
+    let umi_tag: [u8; 2] = opts.umi_tag.unwrap_or_else(|| "UB".to_string()).into_bytes().try_into().expect("umi-tag must be exactly 2 chars long");
 
-    let gene_id = format!("{}{}", read_result.gene, gene_suffix);
+    let num_threads = opts.num_proc.unwrap_or_else(rayon::current_num_threads);
 
-    #[cfg(debug_assertions)]
-    println!("Chr {chr}, cigar {cigar}, start {start} : CellID: {cell_id}");
+    let mut mapping_info = MappingInfo::new(Some(log_file), 3.0, 0, None);
+    mapping_info.start_counter();
 
-    let umi_u64 = IntToStr::new(umi.into(), 32).into_u64();
-    let cell_id_u64: u64 = cell_id
-        .parse::<u64>()
-        .unwrap_or_else(|_| IntToStr::new(cell_id.into(), 32).into_u64());
-
-    if !gex.try_insert(
-        &cell_id_u64,
-        GeneUmiHash(genes.get_gene_id(&gene_id), umi_u64),
-        mapping_info,
-    ) {
-        mapping_info.report("UMI_duplicate");
-    }
-}
-*/
-    let gene_id = match gtf.match_cigar_to_gene(&chr, &cigar, start.try_into().unwrap() , iterator) {
-        
-        Some(read_result) => {
-            /*
-            A00681:1014:HWGVKDMXY:2:2146:22064:36855    0   chr6    70703449    255 71M *   0   0   TCCCTGCATCCAGTGAGCAGTTAACATCTGGAGGTGCCTCAGTCGTGTGCTTCTTGAACAACTTCTACCCC FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF::FFFFFFFFF:FFFFFFF:FFFFFFFFF NH:i:1  HI:i:1  AS:i:65 nM:i:2  XF:Z:Igkc   TR:Z:*  TF:Z:*  CB:Z:39780979   MR:Z:AATCGAAC   CN:Z:T  ST:Z:03 UB:Z:AATCGAAC
-            Checking reads orientation: false vs gtf's orientation (id true): Igkc
-
-            Checking reads orientation: true vs gtf's orientation (id false): Ighg1
-            A00681:1014:HWGVKDMXY:2:2144:12608:13495    16  chr12   113294085   255 60M11S  *   0   0   GTTAGTTTGGGCAGCAGATCCAGGGGCCAGTGGATAGACAGATGGGGGTGTCGTTTTGGCAGAGGCGACGG FF:FF:FF:FFFFFFFFFFFFFFFFFFFFFF:FFFFFFFFFFFFFFFFF:FFF,FFFFFFFFFFFFFFFFF NH:i:1  HI:i:1  AS:i:59 nM:i:0  XF:Z:Ighg1  TR:Z:*  TF:Z:*  CB:Z:42250405   MR:Z:CTTGGATT   CN:Z:T  ST:Z:04 UB:Z:CTTGGATT
-
-            */
-            //println!("Checking reads orientation: {} vs gtf's orientation (id {}): {}", is_reverse_strand , read_result.sens_orientation, read_result.gene);
-            if read_result.sens_orientation == *is_reverse_strand { // antisense read!
-                //println!("Is antisense!");
-                if matches!(read_result.match_type,  RegionStatus::InsideIntron) {
-                    mapping_info.report(&format!("{:?} Orientation mismatch", read_result.match_type) );
-                    return;
-                }
-            }
-            let add = if read_result.sens_orientation == *is_reverse_strand{
-                "_antisense"
-            }else {
-                ""
-            };
-
-            match read_result.match_type {
-                RegionStatus::InsideExon => read_result.gene + add,
-                RegionStatus::SpanningBoundary => read_result.gene+"_unspliced" +add,
-                RegionStatus::InsideIntron => read_result.gene+"_unspliced" +add,
-                RegionStatus::ExtTag => read_result.gene+"_ext",
-                _ => {
-                    mapping_info.report("missing_Gene");
-                    return;
-                },
-            }
-            //format!("{}{}", read_result.gene, gene_suffix)
-            /*
-            // takes too long to actually collect all this info.
-            // is not necessary after the debuging.
-            match read_result.match_type{
-                
-                RegionStatus::InsideExon => {
-                    if read_result.sens_orientation != *is_reverse_strand {
-                        read_result.gene.to_string() + "_antisense"
-                    }
-                    else {
-                        mapping_info.report("InsideExon"); 
-                        read_result.gene.to_string()
-                    }
-                },
-                RegionStatus::SpanningBoundary => {
-                    mapping_info.report("SpanningBoundary"); 
-                    read_result.gene.to_string() + "_unspliced"
-                },
-                RegionStatus::InsideIntron => {
-                    mapping_info.report("InsideIntron"); 
-                    read_result.gene.to_string() + "_unspliced"
-                },
-                RegionStatus::ExtTag => {
-                    mapping_info.report("ExtTag read");
-                    read_result.gene.to_string() + "_ext"
-                },
-                _ => {
-                    mapping_info.report("missing_Gene");
-                    return;
-                }
-            }*/
-            
-        },  // Get the gene_id if found
-        None => {
-            mapping_info.report("missing_Gene");  // Report missing gene match
-            return;
-        },
-
-    };
+    // Parse BAM and GTF
+    println!("reading GTF file");
     
 
-    // Generate a GeneUmiHash
-    // This needs to be fixed - how do I use the genes here?! I totally forgot - but it should be rather straight forward!
-    #[cfg(debug_assertions)]
-    println!("Chr {chr}, cigar {cigar} and this start position {start} : CellID: {cell_id}");
+    let mut gtf = GTF::new();
+    gtf.parse_gtf(&opts.gtf).unwrap();
 
-    let umi_u64 = IntToStr::new( umi.into(), 32 ).into_u64();
+    // Process data
+    let (mut gex, genes) = process_data(
+        &opts.bam,
+        &mut mapping_info,
+        &gtf,
+        umi_tag,
+        num_threads
+    );
 
-    let gene_id_u64 = genes.get_gene_id( &gene_id );
+    // Final reporting and cleanup
 
-    let guh = GeneUmiHash(gene_id_u64, umi_u64 );
+    let file_path_sp = PathBuf::from(&opts.outpath).join("BD_Rhapsody_expression");
+    println!("Writing data to path {:?}", file_path_sp);
 
-    #[cfg(debug_assertions)]
-    println!("\t And I got a gene: {guh}");
+    gex.write_sparse_sub(file_path_sp, &genes, &genes.get_all_gene_names(), opts.min_umi).unwrap();
+    mapping_info.log_report();
 
-    // Try to insert into SingleCellData (gex)
-    // the cellid is already a numeric!
-    let cell_id_u64:u64 =  match cell_id.parse::<u64>() {
-        Ok(number) => number,
-        Err(_e) => IntToStr::new( cell_id.into(), 32).into_u64(),
-    };
-
-    if !gex.try_insert(
-        &cell_id_u64,
-        guh,
-        mapping_info
-    ) {
-        mapping_info.report("UMI_duplicate");
-    }
+    println!("The total issues report:\n{}", mapping_info.report_to_string());
+    println!("Runtime assessment:\n{}", mapping_info.program_states_string());
 
 }
+
+
+/*
 
 
 fn main() {
@@ -433,11 +223,13 @@ fn main() {
             Ok(res) => res,
             Err( "missing_Chromosome" ) => {
                 // We reached the end of the mapped reads - exit the loop
+                eprintln!("We have a missing chromosome for this bam entry - assuming we reached the end of the usable data!\n{:?}",record );
                 break;
             }
             Err(err) => {
+                //eprintln!("ERROR {:?} for this bam entry!\n{:?}",err, record );
                 mapping_info.report( err );
-                return;
+                continue;
             }
         };
 
@@ -603,6 +395,8 @@ fn main() {
 
     println!("Writing data to path {:?}", file_path_sp);
 
+
+
     match gex.write_sparse_sub ( file_path_sp, &genes , &genes.get_all_gene_names(), opts.min_umi ) {
         Ok(_) => (),
         Err(err) => panic!("Error in the data write: {err}")
@@ -637,5 +431,6 @@ fn main() {
 
     mapping_info.report_to_string();
 
-    
 }
+
+*/
