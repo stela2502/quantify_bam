@@ -33,10 +33,10 @@ struct Opts {
     /// used processor cores (default all)
     #[clap(short, long)]
     min_umi: usize,
-    /// tag name for the CELL information (default CB for CellRanger Bam files)
+    /// tag name for the CELL information UNUSED
     #[clap(short, long)]
     cell_tag:Option<String>,
-    /// tag name for the UMI information (default UB for CellRanger Bam files)
+    /// tag name for the UMI information (default UB for velocity default - change to UR for CellRanger)
     #[clap(short, long)]
     umi_tag:Option<String>,
 }
@@ -61,7 +61,12 @@ fn main() {
     let log_file_str = PathBuf::from(&opts.outpath).join("Mapping_log.txt");
     let log_file = File::create(log_file_str).expect("Failed to create log file");
     let umi_tag: [u8; 2] = opts.umi_tag.unwrap_or_else(|| "UB".to_string()).into_bytes().try_into().expect("umi-tag must be exactly 2 chars long");
-    let cell_tag: [u8; 2] = opts.cell_tag.unwrap_or_else(|| "CB".to_string()).into_bytes().try_into().expect("umi-tag must be exactly 2 chars long");
+    match opts.cell_tag {
+        Some(ct) => eprintln!("You have set the cell-tag to {ct}, but cell tags are ignored here"),
+        None => {},
+    }
+    // to not need to change the function calls
+    let cell_tag = *b"CR";
 
     let num_threads = opts.num_proc.unwrap_or_else(rayon::current_num_threads);
 
