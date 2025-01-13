@@ -29,10 +29,10 @@ struct Opts {
     outpath: String,
     /// the minimum (UMI) reads per cell (sample + genes + antibody combined)
     #[clap(short, long)]
-    num_proc: Option<usize>,
+    min_umi: usize,
     /// used processor cores (default all)
     #[clap(short, long)]
-    min_umi: usize,
+    num_proc: Option<usize>,
     /// tag name for the CELL information UNUSED
     #[clap(short, long)]
     cell_tag:Option<String>,
@@ -80,7 +80,6 @@ fn main() {
     let mut gtf = GTF::new();
     gtf.parse_gtf_only_exons(&opts.gtf).unwrap();
 
-    // Process data
     let (mut gex, genes) = process_data_bulk(
         &opts.bam,
         &mut mapping_info,
@@ -88,7 +87,11 @@ fn main() {
         cell_tag,
         umi_tag,
         num_threads
-    );
+    ).unwrap_or_else(|e| {
+        panic!("{e}");
+    });
+
+    println!("we got the gex and it in not empty?: {:?}", gex.len() );
 
     // Final reporting and cleanup
 

@@ -26,9 +26,10 @@ use crate::bam_helper::DataTuple;
 //use bam::record::tags::TagViewer;
 use bam::RecordReader;
 use bam::Header;
-
+use std::io::{Cursor, Write};
 
 const BUFFER_SIZE: usize = 1_000_000;
+
 
 
 fn process_feature(
@@ -140,7 +141,7 @@ pub fn process_data(
     cell_tag: [u8; 2],
     umi_tag: [u8; 2],
     num_threads: usize,
-)  -> ( SingleCellData, IndexedGenes ) {
+)  -> Result<( SingleCellData, IndexedGenes ), String> {
 
 
     let mut reader = bam::BamReader::from_path( bam_file, 1).unwrap();
@@ -195,6 +196,7 @@ pub fn process_data(
             process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
             pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
             buffer.clear();
+            break;
         }
     }
 
@@ -203,7 +205,11 @@ pub fn process_data(
         process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
         pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
     }
-    return ( gex, genes )
+    if gex.len() == 0 {
+        // after running millions of bam features we have not found a single cell?!
+        return Err( format!("After analyzing one batch I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n" ))
+    }
+    return Ok( (gex, genes) )
 }
 
 // Function to process data
@@ -214,7 +220,7 @@ pub fn process_data_bulk(
     cell_tag: [u8; 2],
     umi_tag: [u8; 2],
     num_threads: usize,
-)  -> ( SingleCellData, IndexedGenes ) {
+)  -> Result<( SingleCellData, IndexedGenes ), String> {
 
 
     let mut reader = bam::BamReader::from_path( bam_file, 1).unwrap();
@@ -268,6 +274,10 @@ pub fn process_data_bulk(
             pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
             process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
             pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+            if gex.len() == 0 {
+                // after running millions of bam features we have not found a single cell?!
+                return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len()) )
+            }
             buffer.clear();
         }
     }
@@ -276,9 +286,18 @@ pub fn process_data_bulk(
         pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
         process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
         pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+        if gex.len() == 0 {
+            // after running millions of bam features we have not found a single cell?!
+            return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len() ))
+        }
     }
-    return ( gex, genes )
+    if gex.len() == 0 {
+        // after running millions of bam features we have not found a single cell?!
+        return Err( format!("After analyzing the first batch I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n" ))
+    }
+    return Ok(( gex, genes ))
 }
+
 
 // Function to process a buffer
 fn process_buffer(

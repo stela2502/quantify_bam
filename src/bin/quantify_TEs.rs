@@ -29,14 +29,14 @@ struct Opts {
     outpath: String,
     /// the minimum (UMI) reads per cell (sample + genes + antibody combined)
     #[clap(short, long)]
-    num_proc: Option<usize>,
+    min_umi: usize,
     /// used processor cores (default all)
     #[clap(short, long)]
-    min_umi: usize,
-    /// tag name for the CELL information (default CB for CellRanger Bam files)
+    num_proc: Option<usize>,
+    /// tag name for the CELL information (default CB for velocity default - change to CR for CellRanger)
     #[clap(short, long)]
     cell_tag:Option<String>,
-    /// tag name for the UMI information (default UB for CellRanger Bam files)
+    /// tag name for the UMI information (default UB for velocity default - change to UR for CellRanger)
     #[clap(short, long)]
     umi_tag:Option<String>,
 }
@@ -75,15 +75,19 @@ fn main() {
     let mut gtf = GTF::new();
     gtf.parse_gtf_only_exons(&opts.gtf).unwrap();
 
-    // Process data
-    let (mut gex, genes) = process_data(
+    let (mut gex, genes) =  match process_data(
         &opts.bam,
         &mut mapping_info,
         &gtf,
         cell_tag,
         umi_tag,
         num_threads
-    );
+    ){
+        Ok(ret) => ret,
+        Err(e) => {
+            panic!("{e:?}");
+        }
+    };
 
     // Final reporting and cleanup
 
