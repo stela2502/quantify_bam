@@ -16,7 +16,7 @@ use std::time::SystemTime;
 
 
 #[derive(Parser)]
-#[clap(version = "0.4.1", author = "Stefan L. <stefan.lang@med.lu.se>")]
+#[clap(version = "0.4.2", author = "Stefan L. <stefan.lang@med.lu.se>")]
 struct Opts {
     /// the bam file to quantify
     #[clap(short, long)]
@@ -36,7 +36,7 @@ struct Opts {
     /// tag name for the CELL information UNUSED
     #[clap(short, long)]
     cell_tag:Option<String>,
-    /// tag name for the UMI information (default UB for velocity default - change to UR for CellRanger)
+    /// tag name for the UMI information (default UB for velocity default - change to UR for CellRanger); You can omitt UMI evaluation by using `--umi-tag No`
     #[clap(short, long)]
     umi_tag:Option<String>,
 }

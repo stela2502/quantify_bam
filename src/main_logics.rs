@@ -26,7 +26,6 @@ use crate::bam_helper::DataTuple;
 //use bam::record::tags::TagViewer;
 use bam::RecordReader;
 use bam::Header;
-use std::io::{Cursor, Write};
 
 const BUFFER_SIZE: usize = 1_000_000;
 
@@ -34,7 +33,7 @@ const BUFFER_SIZE: usize = 1_000_000;
 
 fn process_feature(
     cell_id: &str, 
-    umi: &str, 
+    umi: &u64, 
     start: i32, 
     cigar: &str, 
     chr: &str,
@@ -98,11 +97,9 @@ fn process_feature(
     #[cfg(debug_assertions)]
     println!("Chr {chr}, cigar {cigar} and this start position {start} : CellID: {cell_id}");
 
-    let umi_u64 = IntToStr::new( umi.into(), 32 ).into_u64();
-
     let gene_id_u64 = genes.get_gene_id( &gene_id );
 
-    let guh = GeneUmiHash(gene_id_u64, umi_u64 );
+    let guh = GeneUmiHash(gene_id_u64, *umi );
 
     #[cfg(debug_assertions)]
     println!("\t And I got a gene: {guh}");
@@ -254,8 +251,7 @@ pub fn process_data_bulk(
             pb.inc(1);
         }
         lines += 1;
-
-        let data_tuple = match get_values_bulk(&record, &ref_id_to_name, &cell_tag, &umi_tag) {
+        let data_tuple = match get_values_bulk(&record, &ref_id_to_name, &cell_tag, &umi_tag, lines ) {
             Ok(res) => res,
             Err("missing_Chromosome") => {
                 eprintln!("Missing chromosome for BAM entry - assuming end of usable data.\n{:?}", record);
@@ -272,7 +268,7 @@ pub fn process_data_bulk(
 
         if buffer.len() >= split {
             pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
-            process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf);
+            process_buffer(&buffer, num_threads, &mut gex, &mut genes, mapping_info, gtf );
             pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
             if gex.len() == 0 {
                 // after running millions of bam features we have not found a single cell?!
@@ -312,7 +308,7 @@ fn process_buffer(
 
     let results: Vec<_> = buffer
         .par_chunks(chunk_size)
-        .map(|chunk| process_chunk(chunk, gtf))
+        .map(| chunk| process_chunk(chunk, gtf ))
         .collect();
 
     for (local_collector, local_report, local_genes) in results {
@@ -323,7 +319,7 @@ fn process_buffer(
 }
 
 // Function to process a chunk
-fn process_chunk(chunk: &[DataTuple], gtf: &GTF) -> (SingleCellData, MappingInfo, IndexedGenes) {
+fn process_chunk(chunk: &[DataTuple], gtf: &GTF ) -> (SingleCellData, MappingInfo, IndexedGenes) {
     let mut local_iterator = ExonIterator::new("part");
     let mut local_collector = SingleCellData::new(1);
     let mut local_report = MappingInfo::new(None, 3.0, 0, None);
