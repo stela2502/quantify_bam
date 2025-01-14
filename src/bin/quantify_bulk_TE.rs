@@ -80,8 +80,8 @@ fn main() {
     // Parse BAM and GTF
     println!("reading GTF file");
     
-
-    let mut gtf = GTF::new();
+    let exon_file = PathBuf::from(&opts.outpath).join("exon_annotation.tsv.gz");
+    let mut gtf = GTF::new( Some( exon_file ));
     gtf.parse_gtf_only_exons(&opts.gtf, &gene_name ).unwrap();
 
     let (mut gex, genes) = process_data_bulk(

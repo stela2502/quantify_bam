@@ -304,6 +304,8 @@ fn process_buffer(
     mapping_info: &mut MappingInfo,
     gtf: &GTF,
 ) {
+    // everything outside this function is file io
+    mapping_info.stop_file_io_time();
     let chunk_size = (buffer.len() / num_threads).max(1);
 
     let results: Vec<_> = buffer
@@ -311,11 +313,18 @@ fn process_buffer(
         .map(| chunk| process_chunk(chunk, gtf ))
         .collect();
 
+    // only the above is the multiprocessor step
+    mapping_info.stop_multi_processor_time();
+
     for (local_collector, local_report, local_genes) in results {
         let translation = genes.merge(&local_genes);
         gex.merge_re_id_genes(local_collector, &translation);
         mapping_info.merge(&local_report);
     }
+    
+    // and that is the main single processor part
+    mapping_info.stop_single_processor_time();
+
 }
 
 // Function to process a chunk

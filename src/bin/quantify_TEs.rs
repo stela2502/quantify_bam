@@ -75,8 +75,8 @@ fn main() {
     // Parse BAM and GTF
     println!("reading GTF file");
     
-
-    let mut gtf = GTF::new();
+    let exon_file = PathBuf::from(&opts.outpath).join("exon_annotation.tsv.gz");
+    let mut gtf = GTF::new( Some( exon_file ));
     gtf.parse_gtf_only_exons(&opts.gtf, &gene_name ).unwrap();
 
     let (mut gex, genes) =  match process_data(
@@ -95,11 +95,15 @@ fn main() {
 
     // Final reporting and cleanup
 
+    mapping_info.stop_single_processor_time();
+
     let file_path_sp = PathBuf::from(&opts.outpath).join("BD_Rhapsody_expression");
     println!("Writing data to path {:?}", file_path_sp);
 
     gex.write_sparse_sub(file_path_sp, &genes, &genes.get_all_gene_names(), opts.min_umi).unwrap();
     mapping_info.log_report();
+
+    mapping_info.stop_file_io_time();
 
     println!("The total issues report:\n{}", mapping_info.report_to_string());
     println!("Runtime assessment:\n{}", mapping_info.program_states_string());

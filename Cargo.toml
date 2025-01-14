@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "3.0.14", features = ["derive"] }
+flate2 = "*"
 indicatif = {version = "*", features = ["rayon"]}
 rayon = "1.5"
 num_cpus = "1.13"  # Or the latest version

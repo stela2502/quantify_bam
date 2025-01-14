@@ -2,10 +2,11 @@ use std::collections::HashMap;
 //use std::cmp::Ordering;
 use std::error::Error;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::fs::File;
-use std::io::BufReader;
-use std::io::BufRead;
+use std::io::{BufReader, BufRead, BufWriter, Write};
+use flate2::write::GzEncoder;
+use flate2::Compression;
 
 use std::fmt;
 
@@ -23,6 +24,7 @@ pub enum QueryErrors {
 #[derive(Debug)]
 pub struct GTF {
     pub chromosomes: HashMap<String, Vec<Gene>>, // Group genes and exons by chromosome
+    exon_file: Option<BufWriter<GzEncoder<File>>>, // Buffered gzip writer
 }
 
 // Implement the Display trait for Gtf
@@ -42,9 +44,20 @@ impl fmt::Display for GTF {
 
 
 impl GTF {
-    pub fn new() -> Self {
+    pub fn new( exon_file_path:Option<PathBuf> ) -> Self {
+
+        let exon_file = exon_file_path.map(|path| {
+            let file = File::create(path).expect("Unable to create exon file");
+            let encoder = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(encoder);
+            let line = format!("transcript_id\tgene_name\tchr\tstart\tend\n");
+            writer.write_all(line.as_bytes()).expect("Failed to write to file");
+            writer
+        });
+
         GTF {
             chromosomes: HashMap::new(),
+            exon_file,
         }
     }
 
@@ -54,6 +67,10 @@ impl GTF {
         
         let mut new_gene = Gene::new(gene_id, gene_name, start, end, sens_orientation);
         new_gene.add_exon(start, end);
+        if let Some(ref mut writer) = self.exon_file {
+            let line = format!("{}\t{}\t{}\t{}\t{}\n", gene_id, gene_name, chromosome, start, end);
+            writer.write_all(line.as_bytes()).expect("Failed to write to file");
+        }
         chromosome_genes.push(new_gene);
         
     }
@@ -70,6 +87,10 @@ impl GTF {
             // If the gene does not exist, create a new gene and add the exon
             let mut new_gene = Gene::new(gene_id, gene_name, start, end, sens_orientation);
             new_gene.add_exon(start, end);
+            if let Some(ref mut writer) = self.exon_file {
+                let line = format!("{}\t{}\t{}\t{}\t{}\n", gene_id, gene_name, chromosome, start, end);
+                writer.write_all(line.as_bytes()).expect("Failed to write to file");
+            }
             chromosome_genes.push(new_gene);
         }
     }

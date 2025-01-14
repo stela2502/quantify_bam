@@ -82,7 +82,7 @@ fn main() {
     println!("reading GTF file");
     
 
-    let mut gtf = GTF::new();
+    let mut gtf = GTF::new(None);
     gtf.parse_gtf(&opts.gtf).unwrap();
 
     // Process data
