@@ -39,6 +39,9 @@ struct Opts {
     /// tag name for the UMI information (default UB for velocity default - change to UR for CellRanger)
     #[clap(short, long)]
     umi_tag:Option<String>,
+    /// which gtf tag should be used as gene name (transcript_id) - Choose the most TE specific one!
+    #[clap(long)]
+    gene_name: Option<String>,
 }
 
 
@@ -62,6 +65,7 @@ fn main() {
     let log_file = File::create(log_file_str).expect("Failed to create log file");
     let umi_tag: [u8; 2] = opts.umi_tag.unwrap_or_else(|| "UB".to_string()).into_bytes().try_into().expect("umi-tag must be exactly 2 chars long");
     let cell_tag: [u8; 2] = opts.cell_tag.unwrap_or_else(|| "CB".to_string()).into_bytes().try_into().expect("umi-tag must be exactly 2 chars long");
+    let gene_name =  opts.gene_name.unwrap_or_else(|| "transcript_id".to_string());
 
     let num_threads = opts.num_proc.unwrap_or_else(rayon::current_num_threads);
 
@@ -73,7 +77,7 @@ fn main() {
     
 
     let mut gtf = GTF::new();
-    gtf.parse_gtf_only_exons(&opts.gtf).unwrap();
+    gtf.parse_gtf_only_exons(&opts.gtf, &gene_name ).unwrap();
 
     let (mut gex, genes) =  match process_data(
         &opts.bam,

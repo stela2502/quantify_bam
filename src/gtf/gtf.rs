@@ -248,7 +248,7 @@ impl GTF {
     }
 
     // This collects exons from a TE gtf
-    pub fn parse_gtf_only_exons(&mut self, file_path: &str) -> Result<(), Box<dyn Error>> {
+    pub fn parse_gtf_only_exons(&mut self, file_path: &str, exact_attr:&str) -> Result<(), Box<dyn Error>> {
         let path = Path::new(file_path);
         let file = File::open(&path)?;
         let reader = BufReader::new(file);
@@ -293,7 +293,7 @@ impl GTF {
 
                 // Extract gene_id and gene_name from the attributes
                 let attributes = fields[8];
-                let gene_id = extract_attribute(attributes, "gene_id").unwrap_or("unknown");
+                let gene_id = extract_attribute(attributes, exact_attr ).unwrap_or("unknown");
                 let gene_name = extract_attribute(attributes, "gene_name").unwrap_or("unknown");
 
                 let cleaned_gene_id: String = gene_id.chars()
