@@ -29,20 +29,34 @@ use bam::Header;
 
 const BUFFER_SIZE: usize = 1_000_000;
 
+use std::env;
 
+lazy_static! {
+    static ref PROGRAM_NAME: String = {
+        if let Some(program_path) = env::args().next() {
+            if let Some(program_name) = Path::new(&program_path).file_name() {
+                program_name.to_string_lossy().to_string()
+            } else {
+                String::from("Unknown")
+            }
+        } else {
+            String::from("Unknown")
+        }
+    };
+}
 
 fn process_feature(
-    cell_id: &str, 
-    umi: &u64, 
-    start: i32, 
-    cigar: &str, 
+    cell_id: &str,
+    umi: &u64,
+    start: i32,
+    cigar: &str,
     chr: &str,
     is_reverse_strand: &bool,
     gtf: &GTF, 
-    iterator: &mut ExonIterator, 
+    iterator: &mut ExonIterator,
     gex: &mut SingleCellData,
     genes: &mut IndexedGenes,
-    mapping_info: &mut MappingInfo,  // Now tracks errors using a HashMap
+    mapping_info: &mut MappingInfo, // Now tracks errors using a HashMap
     //chromosmome_mappings: &HashMap<i32, String>
 )
 {

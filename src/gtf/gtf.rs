@@ -142,7 +142,7 @@ impl GTF {
     */
     /// the main query functionality
     pub fn match_cigar_to_gene(&self, chr:&str, cigar: &str, initial_position: usize, 
-        iterator: &mut ExonIterator ) -> Option<ReadResult> {
+        iterator: &mut ExonIterator ) -> Option<Vec<ReadResult>> {
 
         match iterator.last_result_matches( cigar, initial_position ){
             Some(result) => {
@@ -193,7 +193,17 @@ impl GTF {
         // now we have a best matching gene as 
         if ! results.is_empty() {
             //println!("We found a match!");
-            Some(results[best_result_id].clone())
+            let best_type = results[best_result_id].match_type;
+
+            // Filter all results that have the same match_type as the best match
+            let best_matches: Vec<_> = results
+                .iter()
+                .filter(|result| result.match_type == best_type)
+                .cloned() // Clone the matched items
+                .collect();
+
+            Some(best_matches)
+
         }else {
             None
         }

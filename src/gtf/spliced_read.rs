@@ -35,6 +35,7 @@ impl SplicedRead {
                 'I' => { // Insertion
                     exon_length += count; // Insertions can contribute to the current exon length
                     current_position += count; // Move current position
+                    mutation_count += count; // Count deletions as mutations
                 }
                 'D' => { // Deletion
                     mutation_count += count; // Count deletions as mutations
@@ -88,6 +89,11 @@ impl SplicedRead {
                     println!("Unsupported CIGAR operation: {}", operation);
                 }
             }
+        }
+
+        pub fn count_mutations( cigar: &str, seq:&str, qual:&str ) -> usize{
+
+
         }
         
         // If we ended with an exon, finalize it

@@ -4,7 +4,7 @@ use clap::Parser;
 use rustody::mapping_info::MappingInfo;
 
 use quantify_bam::gtf::GTF;
-use quantify_bam::main_logics::{process_data_bulk};
+use quantify_bam::main_logics::{process_data_bulk, PROGRAM_NAME};
 
 extern crate bam;
 
@@ -99,7 +99,7 @@ fn main() {
 
     // Final reporting and cleanup
 
-    let file_path_sp = PathBuf::from(&opts.outpath).join("BD_Rhapsody_expression");
+    let file_path_sp = PathBuf::from(&opts.outpath).join( &PROGRAM_NAME );
     println!("Writing data to path {:?}", file_path_sp);
 
     gex.write_sparse_sub(file_path_sp, &genes, &genes.get_all_gene_names(), opts.min_umi).unwrap();
