@@ -4,8 +4,9 @@ use std::error::Error;
 
 use std::path::{Path, PathBuf};
 use std::fs::File;
-use std::io::{BufReader, BufRead, BufWriter, Write};
+use std::io::{BufReader, BufRead, BufWriter, Write, Read};
 use flate2::write::GzEncoder;
+use flate2::read::GzDecoder;
 use flate2::Compression;
 
 use std::fmt;
@@ -65,7 +66,7 @@ impl GTF {
         // Get the vector of genes for the specified chromosome
         let chromosome_genes = self.chromosomes.entry(chromosome.clone()).or_insert(Vec::new());
         
-        let mut new_gene = Gene::new(gene_id, gene_name, start, end, sens_orientation);
+        let mut new_gene = Gene::new(gene_id, gene_id, start, end, sens_orientation);
         new_gene.add_exon(start, end);
         if let Some(ref mut writer) = self.exon_file {
             let line = format!("{}\t{}\t{}\t{}\t{}\n", gene_id, gene_name, chromosome, start, end);
@@ -271,23 +272,17 @@ impl GTF {
     // This collects exons from a TE gtf
     pub fn parse_gtf_only_exons(&mut self, file_path: &str, exact_attr:&str) -> Result<(), Box<dyn Error>> {
         let path = Path::new(file_path);
-        let file = File::open(&path)?;
-        let reader = BufReader::new(file);
 
-        // Helper function to extract specific attributes like gene_id or gene_name
-        fn extract_attribute<'a>(attributes: &'a str, key: &'a str) -> Option< &'a str > {
-            attributes
-                .split(';')
-                .find_map(|attr| {
-                    let mut parts = attr.trim().split_whitespace();
-                    if let Some(attr_key) = parts.next() {
-                        if attr_key == key {
-                            return parts.next(); // Get the value after the key
-                        }
-                    }
-                    None
-                })
-        }
+        // Determine the reader: plain text or gzip
+        let reader: Box<dyn Read> = if file_path.ends_with(".gz") || Self::is_gzipped(file_path)? {
+            let file = File::open(&path)?;
+            Box::new(GzDecoder::new(file))
+        } else {
+            let file = File::open(&path)?;
+            Box::new(file)
+        };
+
+        let reader = BufReader::new(reader);
 
         for line in reader.lines() {
             let line = line?;
@@ -314,8 +309,8 @@ impl GTF {
 
                 // Extract gene_id and gene_name from the attributes
                 let attributes = fields[8];
-                let gene_id = extract_attribute(attributes, exact_attr ).unwrap_or("unknown");
-                let gene_name = extract_attribute(attributes, "gene_name").unwrap_or("unknown");
+                let gene_id = Self::extract_attribute(attributes, exact_attr ).unwrap_or("unknown");
+                let gene_name = Self::extract_attribute(attributes, "gene_name").unwrap_or("unknown");
 
                 let cleaned_gene_id: String = gene_id.chars()
                     .filter(|&c| c != '"' && c != '\'')
@@ -335,27 +330,43 @@ impl GTF {
         Ok(())
     }
 
+    // Helper function to detect gzip format by inspecting magic bytes
+    fn is_gzipped(file_path: &str) -> Result<bool, Box<dyn Error>> {
+        let mut file = File::open(file_path)?;
+        let mut magic_bytes = [0; 2];
+        file.read_exact(&mut magic_bytes)?;
+        Ok(magic_bytes == [0x1F, 0x8B]) // gzip magic bytes
+    }
+        
+    // Helper function to extract specific attributes like gene_id or gene_name
+    fn extract_attribute<'a>(attributes: &'a str, key: &'a str) -> Option< &'a str > {
+        attributes
+            .split(';')
+            .find_map(|attr| {
+                let mut parts = attr.trim().split_whitespace();
+                if let Some(attr_key) = parts.next() {
+                    if attr_key == key {
+                        return parts.next(); // Get the value after the key
+                    }
+                }
+                None
+            })
+    }
 
     // Function to parse the GTF file and populate the Gtf structure
     pub fn parse_gtf(&mut self, file_path: &str) -> Result<(), Box<dyn Error>> {
         let path = Path::new(file_path);
-        let file = File::open(&path)?;
-        let reader = BufReader::new(file);
 
-        // Helper function to extract specific attributes like gene_id or gene_name
-        fn extract_attribute<'a>(attributes: &'a str, key: &'a str) -> Option< &'a str > {
-            attributes
-                .split(';')
-                .find_map(|attr| {
-                    let mut parts = attr.trim().split_whitespace();
-                    if let Some(attr_key) = parts.next() {
-                        if attr_key == key {
-                            return parts.next(); // Get the value after the key
-                        }
-                    }
-                    None
-                })
-        }
+        // Determine the reader: plain text or gzip
+        let reader: Box<dyn Read> = if file_path.ends_with(".gz") || Self::is_gzipped(file_path)? {
+            let file = File::open(&path)?;
+            Box::new(GzDecoder::new(file))
+        } else {
+            let file = File::open(&path)?;
+            Box::new(file)
+        };
+
+        let reader = BufReader::new(reader);
 
         for line in reader.lines() {
             let line = line?;
@@ -382,8 +393,8 @@ impl GTF {
 
                 // Extract gene_id and gene_name from the attributes
                 let attributes = fields[8];
-                let gene_id = extract_attribute(attributes, "gene_id").unwrap_or("unknown");
-                let gene_name = extract_attribute(attributes, "gene_name").unwrap_or("unknown");
+                let gene_id = Self::extract_attribute(attributes, "gene_id").unwrap_or("unknown");
+                let gene_name = Self::extract_attribute(attributes, "gene_name").unwrap_or("unknown");
 
                 let cleaned_gene_id: String = gene_id.chars()
                     .filter(|&c| c != '"' && c != '\'')

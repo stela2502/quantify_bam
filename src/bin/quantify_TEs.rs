@@ -16,12 +16,12 @@ use std::time::SystemTime;
 
 
 #[derive(Parser)]
-#[clap(version = "0.4.1", author = "Stefan L. <stefan.lang@med.lu.se>")]
+#[clap(version = "0.4.3", author = "Stefan L. <stefan.lang@med.lu.se>")]
 struct Opts {
     /// the bam file to quantify
     #[clap(short, long)]
     bam: String,
-    /// the gtf file fitting to the Bam file
+    /// the gtf file fitting to the Bam file (text or gzipped)
     #[clap(short, long)]
     gtf: String,
     /// the outpath
