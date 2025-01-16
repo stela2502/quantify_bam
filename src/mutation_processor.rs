@@ -1,4 +1,5 @@
 use regex::Regex;
+use rustody::mapping_info::MappingInfo;
 
 pub struct MutationProcessor {
     pub quality_cutoff: usize, // Mean quality score threshold
@@ -8,7 +9,7 @@ impl MutationProcessor {
 
     /// the main entry into the mutations.
     /// Give me the bam entries start, the Cigar,  sequence and quality scores and I give you a vector detected mutations
-    pub fn get_all_mutations(&self, bam_start:usize, cigar:&str, sequence:&[u8], qual:&[u8] ) -> Vec<String>{
+    pub fn get_all_mutations(&self, bam_start:usize, cigar:&str, sequence:&[u8], qual:&[u8], mapping_info: &mut MappingInfo ) -> Vec<String>{
         let re_start = Regex::new(r"(\d+)([MIDNSHPX=Z])").unwrap();
         let mut current_position = bam_start; // Start from the provided position
         let mut current_loc_pos = 0;
@@ -25,7 +26,8 @@ impl MutationProcessor {
                 }
                 if let Some(name) = self.mutation_name(operation, current_position, current_loc_pos, count, sequence, qual) {
                     ret.push(name)
-
+                }else {
+                    mapping_info.report("not mutated");
                 }
                 if operation != 'D' {
                     current_position += count;

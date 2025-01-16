@@ -462,6 +462,7 @@ fn process_feature(
                         &data.3,
                         &data.6, 
                         &data.7,
+                        mapping_info,
                     ){
                         let snip = gene_id.to_string() +"/" + &data.4 + "/" + &name;
                         let mut_id = mut_idx.get_gene_id( &snip );
