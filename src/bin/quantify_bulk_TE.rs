@@ -4,6 +4,7 @@ use clap::Parser;
 use rustody::mapping_info::MappingInfo;
 
 use quantify_bam::gtf::GTF;
+use quantify_bam::mutation_processor::MutationProcessor;
 use quantify_bam::main_logics::{process_data_bulk, PROGRAM_NAME};
 
 extern crate bam;
@@ -42,6 +43,9 @@ struct Opts {
     /// which gtf tag should be used as gene name (transcript_id) - Choose the most TE specific one!
     #[clap(long)]
     gene_name: Option<String>,
+    /// For mutation collection please give me a quality cutoff for accepting a nucl as a valid mutation (20? 30?).
+    #[clap(short, long)]
+    qual:Option<usize>,
 }
 
 
@@ -84,25 +88,44 @@ fn main() {
     let mut gtf = GTF::new( Some( exon_file ));
     gtf.parse_gtf_only_exons(&opts.gtf, &gene_name ).unwrap();
 
-    let (mut gex, genes) = process_data_bulk(
+    let mutations: Option<MutationProcessor> = match opts.qual {
+        Some(quality) => {
+            Some(MutationProcessor { quality_cutoff:quality })
+        },
+        None => None
+    };
+
+    // Process data
+    let ( mut expr_results, mut mut_results ) =  match process_data_bulk(
         &opts.bam,
         &mut mapping_info,
         &gtf,
         cell_tag,
         umi_tag,
-        num_threads
-    ).unwrap_or_else(|e| {
-        panic!("{e}");
-    });
-
-    println!("we got the gex and it in not empty?: {:?}", gex.len() );
+        num_threads,
+        &mutations
+    ){
+        Ok(ret) => ret,
+        Err(e) => {
+            panic!("{e:?}");
+        }
+    };
 
     // Final reporting and cleanup
 
-    let file_path_sp = PathBuf::from(&opts.outpath).join( &PROGRAM_NAME );
+    let file_path_sp = PathBuf::from(&opts.outpath).join( &*PROGRAM_NAME );
     println!("Writing data to path {:?}", file_path_sp);
 
-    gex.write_sparse_sub(file_path_sp, &genes, &genes.get_all_gene_names(), opts.min_umi).unwrap();
+    let info = expr_results.0.write_sparse_sub(file_path_sp, &expr_results.1, &expr_results.1.get_all_gene_names(), opts.min_umi).unwrap();
+    mapping_info.write_to_log( info );
+
+    if mut_results.0.len() > 0 {
+        let file_path_sp_mut = PathBuf::from(&opts.outpath).join( &*PROGRAM_NAME ).join("_mutations");
+        println!("Writing mutation data to path {:?}", file_path_sp_mut);
+        let i2 = mut_results.0.write_sparse_sub(file_path_sp_mut, &mut_results.1, &mut_results.1.get_all_gene_names(), opts.min_umi).unwrap();
+        mapping_info.write_to_log( i2 );
+    }
+
     mapping_info.log_report();
 
     println!("The total issues report:\n{}", mapping_info.report_to_string());

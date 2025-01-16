@@ -11,7 +11,7 @@ use flate2::Compression;
 
 use std::fmt;
 
-use crate::gtf::{gene::Gene, RegionStatus,ExonIterator,SplicedRead};
+use crate::gtf::{gene::Gene, gene::RegionStatus,ExonIterator,SplicedRead};
 
 use crate::gtf::exon_iterator::ReadResult;
 
@@ -193,7 +193,7 @@ impl GTF {
         // now we have a best matching gene as 
         if ! results.is_empty() {
             //println!("We found a match!");
-            let best_type = results[best_result_id].match_type;
+            let best_type = results[best_result_id].match_type.clone();
 
             // Filter all results that have the same match_type as the best match
             let best_matches: Vec<_> = results

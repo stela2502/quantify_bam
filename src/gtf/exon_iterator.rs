@@ -19,13 +19,13 @@ pub struct ReadIndex {
 pub struct ReadResult {
     pub gene: String,
     pub sens_orientation: bool,
-    pub match_type: RegionStatus
+    pub match_type: RegionStatus,
 }
 
 
 #[derive(Debug)]
 pub struct ExonIterator {
-    results: VecDeque<(ReadIndex, ReadResult)>, // Store results in a VecDeque
+    results: VecDeque< (ReadIndex, Vec<ReadResult> ) >, // Store results in a VecDeque
     max_size: usize,
     gene_id: usize,
     exon_id: usize,
@@ -63,7 +63,7 @@ impl ExonIterator {
         }
     }
 
-    pub fn last_result_matches( &mut self, cigar: &str, start_position: usize ) -> Option<ReadResult> {
+    pub fn last_result_matches( &mut self, cigar: &str, start_position: usize ) -> Option<Vec<ReadResult>> {
 
         let read_index = ReadIndex {
             start: start_position,
@@ -79,7 +79,7 @@ impl ExonIterator {
         return None
     }
 
-    pub fn add_last_match (&mut self, cigar: &str, start_position: usize, result: &ReadResult ) {
+    pub fn add_last_match (&mut self, cigar: &str, start_position: usize, result: &Vec<ReadResult> ) {
         // Check if we need to remove the oldest entry to maintain the max size
         let read_index = ReadIndex {
             start: start_position,

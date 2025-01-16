@@ -90,11 +90,6 @@ impl SplicedRead {
                 }
             }
         }
-
-        pub fn count_mutations( cigar: &str, seq:&str, qual:&str ) -> usize{
-
-
-        }
         
         // If we ended with an exon, finalize it
         if exon_length > 0 {

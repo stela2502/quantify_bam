@@ -1,12 +1,14 @@
 
-use bam::record::Record;
-use std::collections::HashMap;
-
 use bam::record::tags::{StringType, TagValue};
+use bam::record::Record;
+
+use std::collections::HashMap;
 
 use rustody::int_to_str::IntToStr;
 
-pub type DataTuple = (String, u64, i32, String, String, bool);
+/// The DataTuple stores the data from the Bam files:
+/// (cell_id, umi, start, cigar, chr, is_reverse_strand, sequence as u8's, quality as u8's  )
+pub type DataTuple = (String, u64, i32, String, String, bool, Vec<u8>, Vec<u8> );
 
 /// get_tag will only return string tags - integer or floats nbeed to be implemented when needed.
 pub fn get_tag(bam_feature: &Record, tag: &[u8;2]) -> Option<String> {
@@ -30,7 +32,8 @@ pub fn get_tag(bam_feature: &Record, tag: &[u8;2]) -> Option<String> {
 /// Bam is 0-based start position and end exclusive whereas gtf is 1-based and end inclusive.
 /// This means that the end is actually the same value - just the start for GTF needs to be bam start +1
 /// That is what this function returns for a start!
-pub fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String>, bam_cell_tag: &[u8;2], bam_umi_tag:&[u8;2] ) 
+pub fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String>, 
+    bam_cell_tag: &[u8;2], bam_umi_tag:&[u8;2], ) 
          -> Result< DataTuple , &'a str> {
 
     // Extract the chromosome (reference name)
@@ -68,13 +71,16 @@ pub fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a Ha
         bam_feature, 
         ( &cell_id, &umi, start+1, &bam_feature.cigar().to_string(), &chr, &bam_feature.flag().is_reverse_strand() ) 
     );*/
+    
     let res: DataTuple =  (
         cell_id, 
         umi_u64,  
         start+1, 
         bam_feature.cigar().to_string(), 
         chr,  
-        bam_feature.flag().is_reverse_strand() 
+        bam_feature.flag().is_reverse_strand(),
+        bam_feature.sequence().raw().to_vec(),
+        bam_feature.qualities().raw().to_vec()
         );  // convert bam to gtf notation
     Ok( res )
 }
@@ -87,7 +93,8 @@ pub fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a Ha
 /// Bam is 0-based start position and end exclusive whereas gtf is 1-based and end inclusive.
 /// This means that the end is actually the same value - just the start for GTF needs to be bam start +1
 /// That is what this function returns for a start!
-pub fn get_values_bulk<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String>, _bam_cell_tag: &[u8;2], bam_umi_tag:&[u8;2] , pseudo_umi:u64) 
+pub fn get_values_bulk<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a HashMap<i32, String>,
+         _bam_cell_tag: &[u8;2], bam_umi_tag:&[u8;2] , pseudo_umi:u64,) 
          -> Result< DataTuple , &'a str> {
 
     // Extract the chromosome (reference name)
@@ -122,13 +129,16 @@ pub fn get_values_bulk<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&
         bam_feature, 
         ( &cell_id, &umi, start+1, &bam_feature.cigar().to_string(), &chr, &bam_feature.flag().is_reverse_strand() ) 
     );*/
+
     let res: DataTuple =  (
         cell_id, 
         umi_u64,  
         start+1, 
         bam_feature.cigar().to_string(), 
         chr,  
-        bam_feature.flag().is_reverse_strand() 
+        bam_feature.flag().is_reverse_strand(),
+        bam_feature.sequence().raw().to_vec(),
+        bam_feature.qualities().raw().to_vec()
         );  // convert bam to gtf notation
     Ok( res )
 }
