@@ -24,7 +24,7 @@ impl MutationProcessor {
                 if current_loc_pos + count > qual.len() {
                     panic!("MutationProcessor::get_all_mutations - cigar {cigar} lead to a out of range issue: {current_loc_pos} + {count} ({})> {}" ,current_loc_pos + count,qual.len() );
                 }
-                if let Some(name) = self.mutation_name(operation, current_position, current_loc_pos, count, sequence, qual) {
+                if let Some(name) = self.mutation_name(operation, current_position, current_loc_pos, count, sequence, qual, mapping_info) {
                     ret.push(name)
                 }else {
                     mapping_info.report("not mutated");
@@ -47,6 +47,7 @@ impl MutationProcessor {
         length: usize,
         seq: &[u8], // Accept slice of u8 directly
         qual: &[u8], // Accept slice of u8 directly
+        mapping_info: &mut MappingInfo,
     ) -> Option<String> {
         // Check the quality of nucleotides involved in the mutation
         if start+length > qual.len() {
@@ -56,6 +57,7 @@ impl MutationProcessor {
 
         // If the mutation quality is below the cutoff, skip it
         if quality_check < self.quality_cutoff {
+            mapping_info.report(&format!("mutation quality {} - failed",quality_check ) );
             return None;
         }
 
