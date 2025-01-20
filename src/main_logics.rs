@@ -131,10 +131,10 @@ pub fn process_data(
             );
             pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
             buffer.clear();
-            if expr_gex.len() == 0 {
+            /*if expr_gex.len() == 0 {
                 // after running millions of bam features we have not found a single cell?!
                 return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len()) )
-            }
+            }*/
             break;
         }
     }
@@ -153,15 +153,15 @@ pub fn process_data(
             mutations
         );
         pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
-        if expr_gex.len() == 0 {
+        /*if expr_gex.len() == 0 {
             // after running millions of bam features we have not found a single cell?!
             return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len()) )
-        }
+        }*/
     }
-    if expr_gex.len() == 0 {
+    /*if expr_gex.len() == 0 {
         // after running millions of bam features we have not found a single cell?!
         return Err( format!("After analyzing one batch I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n" ))
-    }
+    }*/
     return Ok( (( expr_gex, expr_idx ), ( mut_gex, mut_idx )) )
 }
 
@@ -240,10 +240,10 @@ pub fn process_data_bulk(
                 mutations
             );
             pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
-            if expr_gex.len() == 0 {
+            /*if expr_gex.len() == 0 {
                 // after running millions of bam features we have not found a single cell?!
                 return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len()) )
-            }
+            }*/
             buffer.clear();
         }
     }
@@ -262,15 +262,15 @@ pub fn process_data_bulk(
             mutations
         );
         pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
-        if expr_gex.len() == 0 {
+        /*if expr_gex.len() == 0 {
             // after running millions of bam features we have not found a single cell?!
             return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len() ))
-        }
+        }*/
     }
-    if expr_gex.len() == 0 {
+    /*if expr_gex.len() == 0 {
         // after running millions of bam features we have not found a single cell?!
         return Err( format!("After analyzing the first batch I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n" ))
-    }
+    }*/
     return Ok( (( expr_gex, expr_idx ), ( mut_gex, mut_idx )) )
 }
 

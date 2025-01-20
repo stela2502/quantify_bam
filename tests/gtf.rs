@@ -8,7 +8,7 @@ mod tests {
 
     #[test]
     fn test_parse_gtf() {
-        let mut gtf = GTF::new();
+        let mut gtf = GTF::new( None );
         let result = gtf.parse_gtf("tests/data/test.gtf"); // Use a valid test GTF file path
         
         // Check if the parsing was successful
@@ -27,7 +27,7 @@ mod tests {
 
     #[test]
     fn test_slice_gtf() {
-        let mut gtf = GTF::new(); // Use lowercase `gtf` for the variable
+        let mut gtf = GTF::new( None); // Use lowercase `gtf` for the variable
         let _ = gtf.parse_gtf("tests/data/test.gtf"); // Use a valid test GTF file path
 
         // Assuming we have added some test data here for the gtf
@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_query() {
-        let mut gtf = GTF::new();
+        let mut gtf = GTF::new(None);
 
         // Add exons on chromosome "Y"
         gtf.add_exon("gene1_id", "gene1_name", 20, 40, "Y".to_string(), true);
