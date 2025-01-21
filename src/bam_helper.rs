@@ -60,7 +60,7 @@ pub fn get_values<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&'a Ha
             return Err( "missing_UMI");  // Report missing UMI
         }
     };
-    let umi_u64 = IntToStr::new( umi.into(), 32 ).into_u64();
+    let umi_u64 = IntToStr::new( umi.into(), 32 ).unwrap().into_u64();
 
     // Extract the start and end positions
     let start = bam_feature.start();  // BAM is 0-based, start is inclusive
@@ -117,7 +117,7 @@ pub fn get_values_bulk<'a>( bam_feature: &'a bam::Record, chromosmome_mappings:&
                 return Err( "missing_UMI");  // Report missing UMI
             }
         };
-        IntToStr::new( umi.into(), 32 ).into_u64()
+        IntToStr::new( umi.into(), 32 ).unwrap().into_u64()
     };
 
     // Extract the start and end positions

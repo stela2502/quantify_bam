@@ -1,19 +1,30 @@
 
-use clap::Parser;
-
+//use rustody::cellids::CellIds;
+//use rustody::cellids10x::CellIds10x;
+//use rustody::traits::CellIndex;
 use rustody::mapping_info::MappingInfo;
 
 use quantify_bam::gtf::GTF;
 use quantify_bam::mutation_processor::MutationProcessor;
-use quantify_bam::main_logics::{process_data, PROGRAM_NAME};
+use quantify_bam::main_logics::{process_data, PROGRAM_NAME, AnalysisType, MatchType};
+
 
 extern crate bam;
+
+//use rustody::ofiles::{Ofiles, Fspot};
+
 
 use std::path::PathBuf;
 use std::fs;
 use std::fs::File;
 
+//use std::thread;
+//use rayon::prelude::*;
+
 use std::time::SystemTime;
+
+use clap::{Parser};
+
 
 
 #[derive(Parser)]
@@ -40,14 +51,20 @@ struct Opts {
     /// tag name for the UMI information (default UB for velocity default - change to UR for CellRanger)
     #[clap(short, long)]
     umi_tag:Option<String>,
-    /// which gtf tag should be used as gene name (transcript_id) - Choose the most TE specific one!
-    #[clap(long)]
-    gene_name: Option<String>,
     /// For mutation collection please give me a quality cutoff for accepting a nucl as a valid mutation (20? 30?).
     #[clap(short, long)]
     qual:Option<usize>,
-}
+    /// Collect single cell info or bulk
+    #[clap(short, long, value_enum, default_value = "single-cell")]
+    analysis_type: AnalysisType,
+    /// Match only inside exons or overlapping?
+    #[clap( long, value_enum, default_value = "overlap")]
+    match_type: MatchType,
+    /// which gtf tag should be used as gene name (transcript_id) - Choose the most TE specific one!
+    #[clap(long)]
+    gene_name: Option<String>,
 
+}
 
 
 // Main function
@@ -83,7 +100,6 @@ fn main() {
     let mut gtf = GTF::new( Some( exon_file ));
     gtf.parse_gtf_only_exons(&opts.gtf, &gene_name ).unwrap();
 
-
     let mutations: Option<MutationProcessor> = match opts.qual {
         Some(quality) => {
             Some(MutationProcessor { quality_cutoff:quality })
@@ -99,7 +115,9 @@ fn main() {
         cell_tag,
         umi_tag,
         num_threads,
-        &mutations
+        &mutations,
+        &opts.analysis_type,
+        &opts.match_type,
     ){
         Ok(ret) => ret,
         Err(e) => {
@@ -108,8 +126,6 @@ fn main() {
     };
 
     // Final reporting and cleanup
-
-    mapping_info.stop_single_processor_time();
 
     let file_path_sp = PathBuf::from(&opts.outpath).join( &*PROGRAM_NAME );
     println!("Writing data to path {:?}", file_path_sp);
@@ -124,9 +140,8 @@ fn main() {
         mapping_info.write_to_log( i2 );
     }
 
-    mapping_info.log_report();
-
-    mapping_info.stop_file_io_time();
+    
+    mapping_info.log_report( );
 
     println!("The total issues report:\n{}", mapping_info.report_to_string());
     println!("Runtime assessment:\n{}", mapping_info.program_states_string());
@@ -152,3 +167,4 @@ fn main() {
 
     mapping_info.report_to_string();
 }
+

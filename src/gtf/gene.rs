@@ -161,4 +161,42 @@ impl Gene {
 
         ReadResult { gene: self.gene_name.to_string(), sens_orientation: self.sens_orientation,  match_type }
     }
+
+    /// in comaprison with the function match_to this will check if the read overlaps with the feature with at least one base.
+    pub fn match_to_overlap(&self, spliced_read: &SplicedRead) -> ReadResult {
+        let mut has_partial_match = false;
+        #[allow(unused_variables)] //throws a warning otherwise...
+        let mut fully_matched_exons = 0;
+        let mut exon_matched = false;
+
+        for read_exon in &spliced_read.exons {
+
+            for gene_exon in &self.exons {
+                if read_exon.end >= gene_exon.start && read_exon.start <= gene_exon.end {
+                    // Full alignment of read exon within gene exon
+                    fully_matched_exons += 1;
+                    exon_matched = true;
+                } else if read_exon.start < gene_exon.end && read_exon.end > gene_exon.start {
+                    // Partial overlap with gene exon
+                    has_partial_match = true;
+                    exon_matched = true;
+                }
+            }
+        }
+
+        // Determine match type based on alignment results
+        let match_type = if exon_matched && has_partial_match {
+            RegionStatus::SpanningBoundary
+        } else if exon_matched {
+            RegionStatus::InsideExon
+        }else if spliced_read.start >= self.start && spliced_read.end <= self.end {
+            RegionStatus::InsideIntron // this should stop the tests
+        } else if spliced_read.start > self.end {
+            RegionStatus::AfterGene // this should remove the gene from the list of optional genes
+        } else {
+            RegionStatus::BeforeGene
+        };
+
+        ReadResult { gene: self.gene_name.to_string(), sens_orientation: self.sens_orientation,  match_type }
+    }
 }

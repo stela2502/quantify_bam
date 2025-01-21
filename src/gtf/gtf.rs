@@ -210,6 +210,76 @@ impl GTF {
 
     }
 
+    /// the main query functionality
+    pub fn match_cigar_to_gene_overlap(&self, chr:&str, cigar: &str, initial_position: usize, 
+        iterator: &mut ExonIterator ) -> Option<Vec<ReadResult>> {
+
+        match iterator.last_result_matches( cigar, initial_position ){
+            Some(result) => {
+                //println!("resused old one");
+                return Some(result)
+            },
+            None =>  {},
+        }
+
+        let (spliced_read, final_position) = SplicedRead::new(cigar, initial_position);
+
+        let mut results = Vec::<ReadResult>::new();
+        let mut best_result_id = 0;
+        let mut best_result = RegionStatus::AfterGene; // worst
+
+        if let Some(genes) = self.chromosomes.get( chr ) {
+            //println!("Skipping {:?} entries", iterator.gene_id() );
+            for (index, gene) in genes.iter().enumerate().skip( iterator.gene_id() ) {
+                if gene.start > final_position {
+                    //println!("The next gene's start position is after my end position - no match?");
+                    break
+                }
+                if gene.end < initial_position{
+                    //println!("this gene here end before the match!");
+                    iterator.set_gene_id( index + 1);
+                    continue;
+                }
+                let result = gene.match_to_overlap( &spliced_read );
+                if result.match_type.is_better( &RegionStatus::AfterGene ) {
+                    //println!("Result status is no more BeforeGene: {:?} - skipping {} gene info", result.match_type, index );
+                    if result.match_type.is_better( &best_result ) {
+                        best_result_id = results.len();
+                        best_result = result.match_type.clone();
+                        results.push( result.clone() );
+                        //println!("{}: found a new best result: id {best_result_id}, value {best_result:?}", iterator.gene_id());
+                    }
+                    if result.match_type  == RegionStatus::AfterGene {
+                        break;
+                    }
+                }
+            }
+            //panic!("One is enough here!");
+        }else {
+            //println!("ExtTag {chr} with start {initial_position} and cigar {cigar}");
+            let res = ReadResult { gene: chr.to_string(), sens_orientation: true,  match_type: RegionStatus::ExtTag };
+            results.push( res );
+        }
+        // now we have a best matching gene as 
+        if ! results.is_empty() {
+            //println!("We found a match!");
+            let best_type = results[best_result_id].match_type.clone();
+
+            // Filter all results that have the same match_type as the best match
+            let best_matches: Vec<_> = results
+                .iter()
+                .filter(|result| result.match_type == best_type)
+                .cloned() // Clone the matched items
+                .collect();
+
+            Some(best_matches)
+
+        }else {
+            None
+        }
+
+    }
+
     fn find_search_position(&self, genes: &Vec<Gene>, pos: usize) -> Option<usize> {
         let mut low = 0;
         let mut high = genes.len();

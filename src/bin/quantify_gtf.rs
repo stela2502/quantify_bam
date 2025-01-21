@@ -6,8 +6,8 @@ use rustody::mapping_info::MappingInfo;
 
 use quantify_bam::gtf::GTF;
 use quantify_bam::mutation_processor::MutationProcessor;
-use quantify_bam::main_logics::{process_data, PROGRAM_NAME};
-//use quantify_bam::main_logics::bam::RecordReader;
+use quantify_bam::main_logics::{process_data, PROGRAM_NAME, AnalysisType, MatchType};
+
 
 extern crate bam;
 
@@ -23,7 +23,7 @@ use std::fs::File;
 
 use std::time::SystemTime;
 
-use clap::Parser;
+use clap::{Parser};
 
 
 
@@ -54,6 +54,13 @@ struct Opts {
     /// For mutation collection please give me a quality cutoff for accepting a nucl as a valid mutation (20? 30?).
     #[clap(short, long)]
     qual:Option<usize>,
+    /// Collect single cell info or bulk
+    #[clap(short, long, value_enum, default_value = "single-cell")]
+    analysis_type: AnalysisType,
+    /// Match only inside exons or overlapping?
+    #[clap( long, value_enum, default_value = "exact")]
+    match_type: MatchType,
+
 }
 
 
@@ -104,7 +111,9 @@ fn main() {
         cell_tag,
         umi_tag,
         num_threads,
-        &mutations
+        &mutations,
+        &opts.analysis_type,
+        &opts.match_type,
     ){
         Ok(ret) => ret,
         Err(e) => {
