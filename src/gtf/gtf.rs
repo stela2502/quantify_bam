@@ -22,10 +22,13 @@ pub enum QueryErrors {
     NoMatch,
 }
 
+
 #[derive(Debug)]
 pub struct GTF {
     pub chromosomes: HashMap<String, Vec<Gene>>, // Group genes and exons by chromosome
     exon_file: Option<BufWriter<GzEncoder<File>>>, // Buffered gzip writer
+
+
 }
 
 // Implement the Display trait for Gtf
@@ -76,7 +79,8 @@ impl GTF {
         
     }
 
-    pub fn add_exon(&mut self, gene_id: &str, gene_name: &str, start: usize, end: usize, chromosome: String, sens_orientation: bool) {
+    pub fn add_exon(&mut self, gene_id: &str, gene_name: &str, start: usize, 
+        end: usize, chromosome: String, sens_orientation: bool) {
         // Get the vector of genes for the specified chromosome
         let chromosome_genes = self.chromosomes.entry(chromosome.clone()).or_insert(Vec::new());
 
@@ -406,7 +410,7 @@ impl GTF {
             }
         }
 
-        println!("I have read this:\n{}", self);
+        eprintln!("I have read this:\n{}", self);
         Ok(())
     }
 
@@ -490,7 +494,7 @@ impl GTF {
             }
         }
 
-        println!("I have read this:\n{}", self);
+        eprintln!("I have read this:\n{}", self);
         Ok(())
     }
     
