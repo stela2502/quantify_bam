@@ -11,11 +11,13 @@ use indicatif::ProgressBar;
 use crate::gtf::{GTF, ExonIterator, RegionStatus };
 use crate::gtf::exon_iterator::ReadResult;
 use crate::mutation_processor::MutationProcessor;
-use crate::bam_helper::{get_values, get_values_bulk, DataTuple };
+use crate::bam_helper::{get_values, get_values_bulk };
+use crate::read_data::ReadData;
 
 use rustody::singlecelldata::{SingleCellData, IndexedGenes, cell_data::GeneUmiHash };
 use rustody::mapping_info::MappingInfo;
 use rustody::int_to_str::IntToStr;
+use rustody::analysis::bam_flag::BamFlag;
 
 use std::path::Path;
 
@@ -142,12 +144,14 @@ fn process_data_single(
 
     println!("Using {} processors and processinf {} reads a batch", num_threads, split);
 
-    let mut buffer = Vec::with_capacity(split);
+    let mut buffer = Vec::<(ReadData,Option<ReadData>)>::with_capacity(split);
     let mut expr_gex = SingleCellData::new(1);
     let mut expr_idx = IndexedGenes::empty(Some(0));
 
     let mut mut_gex = SingleCellData::new(1);
     let mut mut_idx = IndexedGenes::empty(Some(0));
+
+    let mut singlets= HashMap::<String, ReadData>::new();
 
     loop {
         match reader.read_into(&mut record) {
@@ -162,20 +166,48 @@ fn process_data_single(
         }
         lines += 1;
 
-        let data_tuple = match get_values(&record, &ref_id_to_name, &cell_tag, &umi_tag) {
-            Ok(res) => res,
+        if let Some(data_tuple) = match get_values(&record, &ref_id_to_name, &cell_tag, &umi_tag) {
+            Ok(res) => {
+                let qname = &res.0; // Cell ID or read name as key
+                let read_data = res.1.clone(); // Clone to avoid ownership issues
+                
+                if read_data.is("paired") {
+                    match singlets.remove(qname) {
+                        Some(first_read) => {
+                            // Mate found! Process the pair
+                            println!("Found paired reads: {:?} <-> {:?}", first_read, read_data);
+                            Some((first_read, Some(read_data)))
+                        }
+                        None => {
+                            // Handle orphaned reads (mate unmapped)
+                            if read_data.is("mate_unmapped") {
+                                println!("Orphaned read (mate unmapped): {:?}", read_data);
+                                Some((read_data, None)) // Process it as a single read
+                            } else {
+                                // No mate found, store this read for future pairing
+                                singlets.insert(qname.to_string(), read_data.clone());
+                                println!("Storing read for future pairing: {:?}", read_data);
+                                None
+                            }
+                        }
+                    }
+                } else {
+                    // Unpaired read (not part of a pair at all)
+                    println!("Unpaired read: {:?}", read_data);
+                    Some((read_data, None))
+                }
+            }
             Err("missing_Chromosome") => {
                 eprintln!("Missing chromosome for BAM entry - assuming end of usable data.\n{:?}", record);
-                break;
+                None
             }
             Err(err) => {
-                //println!("error {err:?}");
                 mapping_info.report(err);
-                continue;
+                None
             }
-        };
-
-        buffer.push(data_tuple);
+        } {
+            buffer.push(data_tuple);
+        }
 
         if buffer.len() >= split {
             pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
@@ -256,12 +288,13 @@ fn process_data_bulk(
 
     println!("Using {} processors and processinf {} reads a batch", num_threads, split);
 
-    let mut buffer = Vec::with_capacity(split);
+    let mut buffer = Vec::<(ReadData, Option<ReadData>)>::with_capacity(split);
     let mut expr_gex = SingleCellData::new(1);
     let mut expr_idx = IndexedGenes::empty(Some(0));
 
     let mut mut_gex = SingleCellData::new(1);
     let mut mut_idx = IndexedGenes::empty(Some(0));
+    let mut singlets= HashMap::<String, ReadData>::new();
 
     loop {
         match reader.read_into(&mut record) {
@@ -275,20 +308,49 @@ fn process_data_bulk(
             pb.inc(1);
         }
         lines += 1;
-        let data_tuple = match get_values_bulk(&record, &ref_id_to_name, &cell_tag, &umi_tag, lines ) {
-            Ok(res) => res,
+
+        if let Some(data_tuple) = match get_values_bulk(&record, &ref_id_to_name, &umi_tag, lines, "1") {
+            Ok(res) => {
+                let qname = &res.0; // Cell ID or read name as key
+                let read_data = res.1.clone(); // Clone to avoid ownership issues
+                
+                if read_data.is("paired") {
+                    match singlets.remove(qname) {
+                        Some(first_read) => {
+                            // Mate found! Process the pair
+                            println!("Found paired reads: {:?} <-> {:?}", first_read, read_data);
+                            Some((first_read, Some(read_data)))
+                        }
+                        None => {
+                            // Handle orphaned reads (mate unmapped)
+                            if read_data.is("mate_unmapped") {
+                                println!("Orphaned read (mate unmapped): {:?}", read_data);
+                                Some((read_data, None)) // Process it as a single read
+                            } else {
+                                // No mate found, store this read for future pairing
+                                singlets.insert(qname.to_string(), read_data.clone());
+                                println!("Storing read for future pairing: {:?}", read_data);
+                                None
+                            }
+                        }
+                    }
+                } else {
+                    // Unpaired read (not part of a pair at all)
+                    println!("Unpaired read: {:?}", read_data);
+                    Some((read_data, None))
+                }
+            }
             Err("missing_Chromosome") => {
                 eprintln!("Missing chromosome for BAM entry - assuming end of usable data.\n{:?}", record);
-                break;
+                None
             }
             Err(err) => {
-                //println!("error {err:?}");
                 mapping_info.report(err);
-                continue;
+                None
             }
-        };
-
-        buffer.push(data_tuple);
+        } {
+            buffer.push(data_tuple);
+        }
 
         if buffer.len() >= split {
             pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
@@ -343,7 +405,7 @@ fn process_data_bulk(
 
 // Function to process a buffer
 fn process_buffer(
-    buffer: &[DataTuple],
+    buffer: &[(ReadData, Option<ReadData>)],
     num_threads: usize,
     expr_gex: &mut SingleCellData,
     expt_idx: &mut IndexedGenes,
@@ -387,7 +449,7 @@ fn process_buffer(
 }
 
 // Function to process a chunk
-fn process_chunk(chunk: &[DataTuple], gtf: &GTF, mutations: &Option<MutationProcessor>, match_type: &MatchType,) -> (( SingleCellData, IndexedGenes),  (SingleCellData,IndexedGenes), MappingInfo ) {
+fn process_chunk(chunk: &[(ReadData, Option<ReadData>)], gtf: &GTF, mutations: &Option<MutationProcessor>, match_type: &MatchType,) -> (( SingleCellData, IndexedGenes),  (SingleCellData,IndexedGenes), MappingInfo ) {
     let mut local_iterator = ExonIterator::new("part");
     // for the expression data
     let mut expr_gex = SingleCellData::new(1);
@@ -401,8 +463,8 @@ fn process_chunk(chunk: &[DataTuple], gtf: &GTF, mutations: &Option<MutationProc
     //     0        1    2      3      4    5                  6    7 
     //for (data.0, umi, start, cigar, chr, is_reverse_strand, seq, qual ) in chunk {
     for data in chunk{
-        if last_chr != &data.4 {
-            match gtf.init_search( &data.4, (data.2).try_into().unwrap(), &mut local_iterator){
+        if last_chr != data.0.chromosome {
+            match gtf.init_search( &data.0.chromosome, (data.0.start).try_into().unwrap(), &mut local_iterator){
                 Ok(_) => {},
                 Err(e) => {
                     local_report.report( &format!("{:?}", e) );
@@ -410,9 +472,9 @@ fn process_chunk(chunk: &[DataTuple], gtf: &GTF, mutations: &Option<MutationProc
                     //panic!("Does the GTF match to the bam file?! ({:?})",e)
                 },
             };
-            last_chr = &data.4 ;
+            last_chr = &data.0.chromosome ;
         }
-        // I do actually not care about the error - it should have alkready been reported anyhow.
+        // I do actually not care about the error - it should have already been reported anyhow.
         let _ = process_feature(
             data,
             gtf,
@@ -432,7 +494,110 @@ fn process_chunk(chunk: &[DataTuple], gtf: &GTF, mutations: &Option<MutationProc
 
 
 fn process_feature(
-    data: &DataTuple,
+    data: &(ReadData, Option<ReadData>),
+    gtf: &GTF, 
+    mutations: &Option<MutationProcessor>,
+    iterator: &mut ExonIterator,
+    exp_gex: &mut SingleCellData,
+    exp_idx: &mut IndexedGenes,
+    mut_gex: &mut SingleCellData,
+    mut_idx: &mut IndexedGenes,
+    mapping_info: &mut MappingInfo,
+    match_type: &MatchType,
+) {
+    let primary_read = &data.0; // Always present
+    let mate_read = data.1.as_ref(); // Optional paired read
+
+    // Parse cell ID from the primary read
+    let cell_id = match parse_cell_id( &primary_read.cell_id ) {
+        Ok(id) => id,
+        Err(_) => return,
+    };
+
+    // Match gene results based on read data
+    let read_result = match match_type {
+        MatchType::Overlap => gtf.match_cigar_to_gene_overlap(
+            &primary_read.chromosome,
+            &primary_read.cigar,
+            primary_read.start.try_into().unwrap(),
+            iterator
+        ),
+        MatchType::Exact => gtf.match_cigar_to_gene(
+            &primary_read.chromosome,
+            &primary_read.cigar,
+            primary_read.start.try_into().unwrap(),
+            iterator
+        ),
+    };
+
+    // Extract gene IDs or handle errors
+    let gene_ids = extract_gene_ids(&read_result, primary_read, mapping_info);
+
+    #[cfg(debug_assertions)]
+    println!(
+        "Chr {}, cigar {} and this start position {} : CellID: {}",
+        &primary_read.chromosome,
+        &primary_read.cigar,
+        primary_read.start,
+        primary_read.cell_id
+    );
+
+    // Process each gene ID
+    for gene_id in &gene_ids {
+        let gene_id_u64 = exp_idx.get_gene_id(gene_id);
+        let guh = GeneUmiHash(gene_id_u64, primary_read.umi);
+
+        #[cfg(debug_assertions)]
+        println!("\t And I got a gene: {guh}");
+
+        if exp_gex.try_insert(&cell_id, guh, mapping_info) {
+            // Handle mutations if any
+            if let Some(processor) = mutations {
+                handle_mutations(processor, primary_read, gene_id, mut_idx, mut_gex, mapping_info, &cell_id);
+            }
+
+            // If the read is paired, process the mate as well
+            if let Some(mate) = mate_read {
+                todo!("Handle this case when I have more brainpower.");
+                let mate_gene_result = match match_type {
+                    MatchType::Overlap => gtf.match_cigar_to_gene_overlap(
+                        &mate.chromosome,
+                        &mate.cigar,
+                        mate.start.try_into().unwrap(),
+                        iterator
+                    ),
+                    MatchType::Exact => gtf.match_cigar_to_gene(
+                        &mate.chromosome,
+                        &mate.cigar,
+                        mate.start.try_into().unwrap(),
+                        iterator
+                    ),
+                };
+
+                let mate_gene_ids = extract_gene_ids(&mate_gene_result, mate, mapping_info);
+
+                for mate_gene_id in &mate_gene_ids {
+                    let mate_gene_id_u64 = exp_idx.get_gene_id(mate_gene_id);
+                    let mate_guh = GeneUmiHash(mate_gene_id_u64, mate.umi);
+
+                    if exp_gex.try_insert(&cell_id, mate_guh, mapping_info) {
+                        if let Some(processor) = mutations {
+                            handle_mutations(processor, mate, mate_gene_id, mut_idx, mut_gex, mapping_info, &cell_id);
+                        }
+                    } else {
+                        mapping_info.report("UMI_duplicate");
+                    }
+                }
+            }
+        } else {
+            mapping_info.report("UMI_duplicate");
+        }
+    }
+}
+
+/*
+fn process_feature(
+    data: &(ReadData, Option<ReadData>),
     gtf: &GTF, 
     mutations: &Option<MutationProcessor>,
     iterator: &mut ExonIterator,
@@ -452,6 +617,7 @@ fn process_feature(
 
     // Match gene results
     let read_result = match match_type {
+        //chr:&str, cigar: &str, initial_position:
         &MatchType::Overlap => gtf.match_cigar_to_gene_overlap(
             &data.4, &data.3, data.2.try_into().unwrap(), iterator
         ),
@@ -484,17 +650,17 @@ fn process_feature(
         }
     }
 
-}
+}*/
 
 fn extract_gene_ids(
     read_result: &Option<Vec<ReadResult>>,
-    data: &DataTuple,
+    data: &ReadData,
     mapping_info: &mut MappingInfo,
 ) -> Vec<String> {
     if let Some(results) = read_result {
         let good: Vec<String> = results
             .iter()
-            .filter(|result| result.sens_orientation != data.5)
+            .filter(|result| result.sens_orientation != data.is("reverse_strand") )
             .filter_map(|result| match result.match_type {
                 RegionStatus::InsideExon => Some(result.gene.clone()),
                 RegionStatus::SpanningBoundary | RegionStatus::InsideIntron => Some(format!("{}_unspliced", result.gene)),
@@ -520,12 +686,12 @@ fn extract_gene_ids(
 
 fn extract_antisense_ids(
     results: &[ReadResult],
-    data: &DataTuple,
+    data: &ReadData,
     mapping_info: &mut MappingInfo,
 ) -> Vec<String> {
     let anti: Vec<String> = results
         .iter()
-        .filter(|result| result.sens_orientation == data.5)
+        .filter(|result| result.sens_orientation == data.is("reverse_strand") )
         .filter_map(|result| match result.match_type {
             RegionStatus::InsideExon => Some(format!("{}_antisense", result.gene)),
             RegionStatus::SpanningBoundary | RegionStatus::InsideIntron => Some(format!("{}_unspliced_antisense", result.gene)),
@@ -558,23 +724,25 @@ fn parse_cell_id(cell_id_str: &str) -> Result<u64, String> {
 
 fn handle_mutations(
     processor: &MutationProcessor,
-    data: &DataTuple,
+    data: &ReadData,
     gene_id: &str,
     mut_idx: &mut IndexedGenes,
     mut_gex: &mut SingleCellData,
     mapping_info: &mut MappingInfo,
     cell_id: &u64,
 ) {
+    return ;
+
     for mutation_name in processor.get_all_mutations(
-        data.2.try_into().unwrap(),
-        &data.3,
-        &data.6,
-        &data.7,
+        data.start.try_into().unwrap(),
+        &data.cigar,
+        &data.sequence,
+        &data.qualities,
         mapping_info,
     ) {
-        let snip = format!("{gene_id}/{}/{}", data.4, mutation_name);
+        let snip = format!("{gene_id}/{}/{}", data.chromosome, mutation_name);
         let mut_id = mut_idx.get_gene_id(&snip);
-        let ghum = GeneUmiHash(mut_id, data.1);
+        let ghum = GeneUmiHash(mut_id, data.umi);
 
         let _ = mut_gex.try_insert(cell_id, ghum, mapping_info);
     }
