@@ -8,9 +8,6 @@ use quantify_bam::gtf::GTF;
 use quantify_bam::mutation_processor::MutationProcessor;
 use quantify_bam::main_logics::{process_data, PROGRAM_NAME, AnalysisType, MatchType};
 
-
-extern crate bam;
-
 //use rustody::ofiles::{Ofiles, Fspot};
 
 
@@ -24,7 +21,6 @@ use std::fs::File;
 use std::time::SystemTime;
 
 use clap::{Parser};
-
 
 
 #[derive(Parser)]

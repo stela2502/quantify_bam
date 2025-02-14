@@ -1,6 +1,6 @@
 pub mod gtf;
 
-pub mod bam_helper;
+pub mod value;
 
 pub mod main_logics;
 
