@@ -156,8 +156,8 @@ fn process_data_single(
             Err(e) => panic!("{}", e),
         }
 
-        if lines % 1_000_000 == 0 {
-            pb.set_message(format!("{} mio reads processed", lines / 1_000_000));
+        if lines % BUFFER_SIZE == 0 {
+            pb.set_message(format!("{} mio reads processed", lines / BUFFER_SIZE));
             pb.inc(1);
         }
         lines += 1;
@@ -178,7 +178,7 @@ fn process_data_single(
         buffer.push(data_tuple);
 
         if buffer.len() >= split {
-            pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
+            pb.set_message(format!("{} mio reads - processing", lines / BUFFER_SIZE));
             process_buffer(
                 &buffer,
                 num_threads, 
@@ -191,7 +191,7 @@ fn process_data_single(
                 mutations,
                 match_type
             );
-            pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+            pb.set_message(format!("{} mio reads - processing finished", lines / BUFFER_SIZE));
             buffer.clear();
             /*if expr_gex.len() == 0 {
                 // after running millions of bam features we have not found a single cell?!
@@ -202,7 +202,7 @@ fn process_data_single(
     }
 
     if !buffer.is_empty() {
-        pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
+        pb.set_message(format!("{} mio reads - processing", lines / BUFFER_SIZE));
         process_buffer(
             &buffer,
             num_threads, 
@@ -215,7 +215,7 @@ fn process_data_single(
             mutations,
             match_type
         );
-        pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+        pb.set_message(format!("{} mio reads - processing finished", lines / BUFFER_SIZE));
         /*if expr_gex.len() == 0 {
             // after running millions of bam features we have not found a single cell?!
             return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len()) )
@@ -270,8 +270,8 @@ fn process_data_bulk(
             Err(e) => panic!("{}", e),
         }
 
-        if lines % 1_000_000 == 0 {
-            pb.set_message(format!("{} mio reads processed", lines / 1_000_000));
+        if lines % BUFFER_SIZE == 0 {
+            pb.set_message(format!("{} mio reads processed", lines / BUFFER_SIZE));
             pb.inc(1);
         }
         lines += 1;
@@ -291,7 +291,7 @@ fn process_data_bulk(
         buffer.push(data_tuple);
 
         if buffer.len() >= split {
-            pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
+            pb.set_message(format!("{} mio reads - processing", lines / BUFFER_SIZE));
             process_buffer(
                 &buffer,
                 num_threads, 
@@ -304,7 +304,7 @@ fn process_data_bulk(
                 mutations,
                 match_type,
             );
-            pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+            pb.set_message(format!("{} mio reads - processing finished", lines / BUFFER_SIZE));
             /*if expr_gex.len() == 0 {
                 // after running millions of bam features we have not found a single cell?!
                 return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len()) )
@@ -314,7 +314,7 @@ fn process_data_bulk(
     }
 
     if !buffer.is_empty() {
-        pb.set_message(format!("{} mio reads - processing", lines / 1_000_000));
+        pb.set_message(format!("{} mio reads - processing", lines / BUFFER_SIZE));
         process_buffer(
             &buffer,
             num_threads, 
@@ -327,7 +327,7 @@ fn process_data_bulk(
             mutations,
             match_type,
         );
-        pb.set_message(format!("{} mio reads - processing finished", lines / 1_000_000));
+        pb.set_message(format!("{} mio reads - processing finished", lines / BUFFER_SIZE));
         /*if expr_gex.len() == 0 {
             // after running millions of bam features we have not found a single cell?!
             return Err( format!("After analyzing {} reads I could not detect a single cell/gene expression value?!\nSorry, but the --cell-tag and/or the --umi-tag might not be correct for this data.\n",buffer.len() ))
